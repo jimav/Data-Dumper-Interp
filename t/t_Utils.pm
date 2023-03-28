@@ -1,24 +1,89 @@
+# License: Public Domain or CC0
+# See https://creativecommons.org/publicdomain/zero/1.0/
+# The author, Jim Avera (jim.avera at gmail) has waived all copyright and
+# related or neighboring rights to the content of this file.
+# Attribution is requested but is not required.
+
+use strict; use warnings  FATAL => 'all'; use feature qw/say/;
+use feature qw/say state current_sub/;
+use utf8;
+
 package t_Utils;
 
 require Exporter;
 use parent 'Exporter';
 
-our @EXPORT = qw/displaystr fmt_codestring timed_run
+our @EXPORT = qw/bug oops ok_with_lineno like_with_lineno
+                 rawstr showstr showcontrols displaystr 
+                 show_white show_empty_string
+                 fmt_codestring timed_run
                  checkeq_literal check
-                 @quotes
+                _check_end
                 /;
 
+our @EXPORT_OK = qw/$showstr_maxlen @quotes/;
+
+use Test::More;
 use Carp;
 
-# Format a Unicode string in «french quotes» and also with hex escapes
-# (so we can still see something useful on non-Unicode platforms).
-#our @quotes = ("«", "»");
-our @quotes = ("<<", ">>");
+sub bug(@) { @_=("BUG:",@_); goto &Carp::confess }
+sub oops(@) { @_=("Internal oops! ",@_); goto &Carp::confess }
+
+sub show_empty_string(_) {
+  $_[0] eq "" ? "<empty string>" : $_[0]
+}
+
+sub show_white(_) { # show whitespace which might not be noticed
+  local $_ = shift;
+  return "(Is undef)" unless defined;
+  s/\t/<tab>/sg;
+  s/( +)$/"<space>" x length($1)/seg; # only trailing spaces
+  s/\n/<newline>\n/sg;
+  show_empty_string $_
+}
+
+our $showstr_maxlen = 300;
+our @quotes = ("«", "»");
+#our @quotes = ("<<", ">>");
+sub rawstr(_) { # just the characters in French Quotes (truncated)
+  $quotes[0].(length($_[0])>$showstr_maxlen ? substr($_[0],0,$showstr_maxlen-3)."..." : $_[0]).$quotes[1]
+}
+
+# Show controls as single-charcter indicators like DDI's "controlpics",
+# with the whole thing in French Quotes.  Truncate if huge.
+sub showcontrols(_) {
+  local $_ = shift;
+  s/\n/\N{U+2424}/sg; # a special NL glyph
+  s/[\x{00}-\x{1F}]/ chr( ord($&)+0x2400 ) /aseg;
+  rawstr
+}
+
+# showstr(_) : Show controls as traditional \t \n etc. if possible
+BEGIN{
+  if (Cwd::abs_path(__FILE__) =~ /Data-Dumper-Interp/) {
+    # we are being used to test Data::Dumper::Interp, so don't use it
+    eval 'sub showstr(_) { showcontrols(shift) }';
+  } else {
+    use Data::Dumper::Interp;
+    eval 'sub showstr(_) { visnew->Useqq("unicode")->vis(shift) }';
+  }
+  die $@ if $@;
+}
+
+# Show both the raw string in French Quotes, and with hex escapes
+# so we can still see something useful in output from non-Unicode platforms.
 sub displaystr($) {
   my ($input) = @_;
   return "undef" if ! defined($input);
-  chomp( my $dd = Data::Dumper->new([$input])->Useqq(1)->Terse(1)->Indent(0)->Dump );
-  $quotes[0].$input.$quotes[1]."($dd)"
+  # Data::Dumper will show 'wide' characters as hex escapes
+  my $dd = Data::Dumper->new([$input])->Useqq(1)->Terse(1)->Indent(0)->Dump;
+  chomp $dd;
+  if ($dd eq $input || $dd eq "\"$input\"") {
+    # No special characters, so omit the hex-escaped form
+    return rawstr($input)
+  } else {
+    return rawstr($input)."($dd)"
+  }
 }
 
 sub fmt_codestring($;$) { # returns list of lines
@@ -41,6 +106,31 @@ sub timed_run(&$@) {
   confess "TOOK TOO LONG ($cpusecs CPU seconds vs. limit of $maxcpusecs)\n"
     if $cpusecs > $maxcpusecs;
   if (wantarray) {return @result} else {return $result};
+}
+
+sub ok_with_lineno($;$) {
+  my ($isok, $test_label) = @_;
+  my $lno = (caller)[2];
+  $test_label = ($test_label//"") . " (line $lno)";
+  @_ = ( $isok, $test_label );
+  goto &Test::More::ok;  # show caller's line number
+}
+sub like_with_lineno($$;$) {
+  my ($got, $exp, $test_label) = @_;
+  my $lno = (caller)[2];
+  $test_label = ($test_label//"") . " (line $lno)";
+  @_ = ( $got, $exp, $test_label );
+  goto &Test::More::like;  # show caller's line number
+}
+
+sub _check_end($$$) {
+  my ($errmsg, $test_label, $ok_only_if_failed) = @_;
+  return
+    if $ok_only_if_failed && !$errmsg;
+  my $lno = (caller)[2];
+  diag "**********\n${errmsg}***********\n" if $errmsg;
+  @_ = ( !$errmsg, $test_label );
+  goto &ok_with_lineno;
 }
 
 # Nicer alternative to check() when 'expected' is a literal string, not regex
@@ -91,18 +181,18 @@ sub expstr2re($) {
     # Alternate: qr/STUFF/uMODIFIERS
     # Alternate: qr/(?^MODIFIERS:STUFF)/
     # Alternate: qr/(?^uMODIFIERS:STUFF)/
-#say "#XX qr BEFORE: $_"; 
+#say "#XX qr BEFORE: $_";
     s#qr/([^\/]+)/([msixpodualngcer]*)
      #\\E\(\\Qqr/$1/\\Eu?\\Q$2\\E|\\Qqr/(?^\\Eu?\\Q$2:$1)/\\E\)\\Q#xg
       or confess "Problem with qr/.../ in input string: $_";
-#say "#XX qr AFTER : $_"; 
+#say "#XX qr AFTER : $_";
   }
   if (m#\{"([\w:]+).*"\}#) {
     # Canonical: fh=\*{"::\$fh"}  or  fh=\*{"Some::Pkg::\$fh"}
     #   which will be encoded above like ...\Qfh=<BS>*{"::<BS>\E\$\Qfh"}
     # Alt1     : fh=\*{"main::\$fh"}
     # Alt2     : fh=\*{'main::$fh'}  or  fh=\*{'main::$fh'} etc.
-#say "#XX fh BEFORE: $_"; 
+#say "#XX fh BEFORE: $_";
     s{(\w+)=<BS>\*\{"(::)<BS>([^"]+)"\}}
      {$1=<BS>*{\\E(?x: "(?:main::|::) \\Q<BS>$3"\\E | '(?:main::|::) \\Q$3'\\E )\\Q}}xg
     |
@@ -110,11 +200,11 @@ sub expstr2re($) {
      {$1=<BS>*{\\E(?x: "\\Q$2<BS>$3"\\E | '\\Q$2$3'\\E )\\Q}}xg
     or
       confess "Problem with filehandle in input string <<$_>>";
-#say "#XX fh AFTER : $_"; 
+#say "#XX fh AFTER : $_";
   }
   s/<BS>\\/\${bs}\\/g;
   s/<BS>/\\/g;
-#say "#XX    FINAL : $_"; 
+#say "#XX    FINAL : $_";
 
   my $saved_dollarat = $@;
   my $re = eval "qr{${_}}"; die "$@ " if $@;

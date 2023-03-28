@@ -16,6 +16,8 @@ my $aref = [100,101,102];
 my $sref = \42;
 my $bigint = Math::BigInt->new("1234567890987654321234567890987654321");
 
+note "addrvis(\$href)=",addrvis($href);
+note "addrvis(refaddr \$href)=",addrvis(refaddr $href);
 note "refvis('foo')=",refvis('foo');
 note "refvis(42)=",refvis(42);
 note "refvis(\$href)=",refvis($href);
@@ -40,7 +42,7 @@ sub check_refvis($) {
   } else {
     # item is not a reference
     confess "mal-formed addrvis(non-ref) result ($abbr_addr)" 
-      unless !defined($item) || $abbr_addr =~ /^\<\d{3,99}:[\da-f]{3,99}\>$/;
+      unless !defined($item) || $abbr_addr =~ /^\d{3,99}:[\da-f]{3,99}$/;
     $exp = $vis_result;
     $desc = sprintf "NON-ref: refvis(%s) eq vis eq %s", u($item), vis($exp);
     #FIXME: what about addrvis(non-ref) ??
@@ -71,7 +73,7 @@ sub check_addrvis() {
   for my $n (@addresses) {
     my $hexchars = substr(sprintf("%09x",$n),-$ndigits);
     my $act = addrvis($n); 
-    my $re = qr/^\<.*:${hexchars}\>$/;
+    my $re = qr/^\d+:${hexchars}$/;
     unless ($act =~ /$re/) {
 #      for my $addr (sort { $a <=> $b } keys %$addrvis_a2abv) {
 #        diag sprintf "  addrvis_a2abv{%x}=%s", 
@@ -80,7 +82,7 @@ sub check_addrvis() {
       die sprintf("addrvis(0x%x) wrong (%s) re: %s\n", $n, $act, $re),
           "Cache contains ", 
             scalar(keys %$addrvis_a2abv), " entries\n",
-          "addrvis_ndivgits = ", $addrvis_ndigits
+          "addrvis_ndivgits = ", $addrvis_ndigits, " ";
     }
   }
 }

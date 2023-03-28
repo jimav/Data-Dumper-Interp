@@ -63,19 +63,16 @@ sub addrvis_forget() {
 }
 sub addrvis(_) {
   # Display an address as decimal:hex showing only the last few digits.
-  # The arg can be a numeric address or a ref from which the addr is taken.
   # The number of digits shown increases when collisions occur.
-  my $a = shift // return("undef");
-  my $pfx = "";
-  if (ref $a) {
-    $pfx = reftype($a);
-    $a = refaddr($a);
-  }
+  # The arg can be a numeric address or a ref from which the addr is taken.
+  # If the arg is a ref, the result is REFTYPE<dec:hex> otherwise just dec:hex
+  my $arg = shift // return("undef");
+  my $refarg = ref($arg) ne "";
+  my $a = $refarg ? refaddr($arg) : $arg;
   my sub abbr_hex($) { 
        substr(sprintf("%0*x", $addrvis_ndigits, $_[0]), -$addrvis_ndigits) }
   my sub abbr_dec($) { 
        substr(sprintf("%0*d", $addrvis_ndigits, $_[0]), -$addrvis_ndigits) }
-
   if (! exists $addrvis_a2abv->{$a}) {
     my $abbr = abbr_hex($a);
     while (grep{$abbr eq $_} values %$addrvis_a2abv) {
@@ -85,7 +82,8 @@ sub addrvis(_) {
     }
     $addrvis_a2abv->{$a} = $abbr;
   }
-  "$pfx<".abbr_dec($a).":".$addrvis_a2abv->{$a}.">"
+  my $rawabbr = abbr_dec($a).":".$addrvis_a2abv->{$a};
+  $refarg ? reftype($arg)."<${rawabbr}>" : $rawabbr
 }
 
 =for Pod::Coverage addrvis_forget
@@ -333,6 +331,11 @@ sub alvisq(@) { substr &avisq, 1, -1 }
 sub hlvis(@)  { substr &hvis,  1, -1 }
 sub hlvisq(@) { substr &hvisq, 1, -1 }
 
+# TODO: Integrate this more deeply to avoid duplicating information when
+#       $v -> blessed and object does *not* stringify.  Currently we get:
+#          "HASH<584:4b8>Foo::Bar=HASH(0x5555558fd4b8)"
+#       Stringifying objects are ok, e.g. 
+#          "HASH<632:c38>(Math::BigInt)32"
 sub refvis(_) { my $obj = &__getobj_s->_Vistype('s');
                 my ($v) = $obj->Values;
                 (ref($v) ne "" ? addrvis($v) : "").$obj->Dump
@@ -1182,15 +1185,15 @@ sub _postprocess_DD_result {
   while ((pos()//0) < length) {
        if (/\G[\\\*]/gc)                         { atom($&) } # glued fwd
     elsif (/\G[,;]/gc)                           { commasemi($&) }
-    elsif (/\G"(?:[^"\\]++|\\.)*+"/gc)           { atom($&) } # "quoted"
-    elsif (/\G'(?:[^'\\]++|\\.)*+'/gc)           { atom($&) } # 'quoted'
-    elsif (m(\Gqr/(?:[^\\\/]++|\\.)*+/[a-z]*)gc) { atom($&) } # Regexp
+    elsif (/\G"(?:[^"\\]++|\\.)*+"/gsc)          { atom($&) } # "quoted"
+    elsif (/\G'(?:[^'\\]++|\\.)*+'/gsc)          { atom($&) } # 'quoted'
+    elsif (m(\Gqr/(?:[^\\\/]++|\\.)*+/[a-z]*)gsc){ atom($&) } # Regexp
 
     # With Deparse(1) the body has arbitrary Perl code, which we can't parse
     elsif (/\Gsub\s*${curlies_re}/gc)            { atom($&) } # sub{...}
 
     # $VAR1->[ix] $VAR1->{key} or just $varname
-    elsif (/\G(?:my\s+)?\$(?:${userident_re}|\s*->\s*|${balanced_re})++/gc) { atom($&) }
+    elsif (/\G(?:my\s+)?\$(?:${userident_re}|\s*->\s*|${balanced_re})++/gsc) { atom($&) }
 
     elsif (/\G\b[A-Za-z_][A-Za-z0-9_]*+\b/gc) { atom($&) } # bareword?
     elsif (/\G-?\d[\deE\.]*+\b/gc)            { atom($&) } # number
@@ -1464,7 +1467,7 @@ Data::Dumper::Interp - interpolate Data::Dumper output into strings for human co
   
   # Just abbreviate a referent address or arbitrary number
   say addrvis $ref;           # HASH<457:1c9>
-  say addrvis refaddr($ref);  # <457:1c9>
+  say addrvis refaddr($ref);  # 457:1c9
 
   # Stringify objects
   { use bigint;
@@ -1611,11 +1614,11 @@ if wide characters are present.
 
 =head2 addrvis REF
 
-=head2 addrvis NUMBER or undef
+=head2 addrvis NUMBER
 
 Abbreviate object addresses, showing only the last few digits
 in both decimal and hex.  The result is like I<< "HASHE<lt>457:1c9E<gt>" >>
-for references, I<< "<457:1c9>" >> for a plain numbers, 
+for references, I<< "457:1c9" >> for a plain numbers, 
 or I<"undef"> if the argument is undefined.
 
 Initially 3 digits are shown, but the number of digits increases over
@@ -1623,7 +1626,7 @@ time if necessary to keep new results unambiguous.
 Every unique value is remembered internally, so
 calling this with billions of unique values will use a lot of memory.
 
-B<refvis> is equivalent to
+B<refvis> is essentially the same as
 
   addrvis(REF).vis(REF)   # e.g. "HASH<457:1c9>{ key=>value, ... }"
 
