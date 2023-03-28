@@ -102,8 +102,8 @@ sub _dbshow(_) {
 }
 sub _dbvis(_) {
   my $v = shift;
-  chomp( my $s = Data::Dumper->new([$v])
-                   ->Useqq(1)->Terse(1)->Indent(0)->Sortkeys(\&__sortkeys)->Dump );
+  chomp( my $s = Data::Dumper->new([$v])->Useqq(1)->Terse(1)->Indent(0)
+                                        ->Sortkeys(\&__sortkeys)->Dump );
   $s
 }
 sub _dbvisq(_) {
@@ -333,10 +333,9 @@ sub alvisq(@) { substr &avisq, 1, -1 }
 sub hlvis(@)  { substr &hvis,  1, -1 }
 sub hlvisq(@) { substr &hvisq, 1, -1 }
 
-sub refvis(_) { my $o = &__getobj_s->_Vistype('s');
-                my ($v) = $o->Values;
-                return "undef" unless defined $v;
-                (ref($v) ne "" ? addrvis($v) : "").$o->Dump
+sub refvis(_) { my $obj = &__getobj_s->_Vistype('s');
+                my ($v) = $obj->Values;
+                (ref($v) ne "" ? addrvis($v) : "").$obj->Dump
               }
 
 # Trampolines which replace the call frame with a call directly to the
