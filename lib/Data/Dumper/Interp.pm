@@ -57,8 +57,8 @@ use overload ();
 
 our $addrvis_ndigits = 3;
 our $addrvis_a2abv =  {}; # address => abbreviated hex
-sub addrvis_forget() {
-  $addrvis_ndigits = 3;
+sub addrvis_forget(;$) {
+  $addrvis_ndigits = $_[0] || 3;
   $addrvis_a2abv =  {};
 }
 sub addrvis(_) {
@@ -650,18 +650,20 @@ say "##         orig=",addrvis($orig_itemref)," -> ",_dbvis($$orig_itemref)," at
 
   # About TIED VARIABLES:
   # We must never modify a tied variable because of user-defined side-effects.
-  # Therefore before we might modify a tied variable, the variable must
-  # first be made to be not tied.   N.B. the whole structure was cloned
-  # beforehand, so this does not untie the user's variables.
+  # So if we do want to replace a tied variable we untie it first.
+  # N.B. The whole structure was cloned, so this does not untie the 
+  # user's variables.
 
-    # Side note: Saving refs to members of tied containers is a user error
-    # because such refs point to a magic temporary rather than the actual 
-    # storage in the container (which in general is impossible because tied 
-    # data may be stored externally).  Perl seems to re-use the temporaries,
-    # and bad things (refcount problems?) happen if you store such a ref 
-    # inside a tied container and then untie the container.
-    # Data::Dumper will abort with warning "cannot handle ref type 10"
-    # if called with \$tiedhash{key} [why?]
+    # Side note: Taking a ref to a member of a tied container, 
+    # e.g. \$tiedhash{key}, actually returns a tied scalar or some other 
+    # magical thing which, every time it is read, re-fetches the "referenced" 
+    # datum from the container into a temporary and returns a ref to the temp.
+    # The same temporary is used each time, so the returned ref is the same 
+    # and the illusion of being a normal hash is maintained.
+    # However Data::Dumper can abort with "cannot handle ref type 10"
+    # when it sees such things.  Also, if the magical ref is itself
+    # stored elsewhere in the container and then the container is *untied*,
+    # bat things happend (refcount problems?)
 
   # Our Item is only ever a scalar, either the top-level item from the user
   # or a member of a container we unroll below.  In either case the scalar
@@ -677,7 +679,17 @@ say "##         orig=",addrvis($orig_itemref)," -> ",_dbvis($$orig_itemref)," at
 
   if (defined(my $repl = $self->_replacement($$orig_itemref))) {
     say "##pp Item REPLACED by ",_dbvis($repl)," at ",__LINE__ if $debug;
-    $$cloned_itemref = $repl;
+    # If the item is $#array then the following assignment will try to
+    # change the length of 'array', but blow up because the value is a string.
+    # I suspect similar things could happen with true read-only values
+    # but it appears that Clone::clone makes them writeable.
+    # Anyway, use eval and just leave it as-is if the assignment fails.
+    #
+    eval { $$cloned_itemref = $repl };
+    if ($@) {
+      say "##pp Item *can not* be REPLACED by ",_dbvis($repl)," ($@) at ",__LINE__ if $debug;
+      return;
+    }
     return
   }
 

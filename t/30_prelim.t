@@ -181,6 +181,13 @@ is( dvis('\%{}'), '\%{}' );
         qr/^\Q$obj\E$/ );
 }
 
+# Once caused << "<NQMagic...>0" isn't numeric in scalar assignment >>
+# when the apparent reference to a zero was to be replaced by a reference
+# to "<NQMagic...>0" in the cloned data.
+{ my @ary = (42);
+  ok( eval{ vis(\$#ary) }, 'vis(\$#array) did not hit a bug' );
+}
+
 ## Once hit an assertion
 #{ my @data = ( { crc => -1 } );
 #  push @data, \@data;
