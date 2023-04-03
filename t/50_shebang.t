@@ -29,12 +29,6 @@ use Data::Dumper::Interp;
 
 confess "Non-zero initial CHILD_ERROR ($?)" if $? != 0;
 
-sub visFoldwidth() {
-  "Data::Dumper::Interp::Foldwidth=".u($Data::Dumper::Interp::Foldwidth)
- ." Foldwidth1=".u($Data::Dumper::Interp::Foldwidth1)
- .($Data::Dumper::Interp::Foldwidth ? ("\n".("." x $Data::Dumper::Interp::Foldwidth)) : "")
-}
-
 # Run a variety of tests on an item which is a string or strigified object
 # which is not presented as a bare number (i.e. it is shown in quotes).
 # The caller provides a sub which does the eval in the desired context,
@@ -586,6 +580,8 @@ sub get_closure(;$) {
   local $local_obj = $toplex_obj;
   local $local_regexp = $toplex_regexp;
 
+  use constant CPICS_DEFAULT => 0; # is Useqq('controlpics') the default?
+
   my @dvis_tests = (
     [ __LINE__, q(hexesc:\x{263a}), qq(hexesc:\N{U+263A}) ],   # \x{...} in dvis input
     [ __LINE__, q(NUesc:\N{U+263a}), qq(NUesc:\N{U+263A}) ], # \N{U+...} in dvis input
@@ -597,9 +593,12 @@ sub get_closure(;$) {
 
     [__LINE__, q(unicodehex_str=\"\\x{263a}\\x{263b}\\x{263c}\\x{263d}\\x{263e}\\x{263f}\\x{2640}\\x{2641}\\x{2642}\\x{2643}\\x{2644}\\x{2645}\\x{2646}\\x{2647}\\x{2648}\\x{2649}\\x{264a}\\x{264b}\\x{264c}\\x{264d}\\x{264e}\\x{264f}\\x{2650}\"\n), qq(unicodehex_str="${unicode_str}"\n) ],
 
-    [__LINE__, q($byte_str\n), qq(byte_str=\"\N{SYMBOL FOR NEWLINE}\\13\N{SYMBOL FOR FORM FEED}\N{SYMBOL FOR CARRIAGE RETURN}\\16\\17\\20\\21\\22\\23\\24\\25\\26\\27\\30\\31\\32\N{SYMBOL FOR ESCAPE}\\34\\35\\36\"\n) ],
-    #[__LINE__, q($byte_str\n), qq(byte_str=\"\\n\\13\\f\\r\\16\\17\\20\\21\\22\\23\\24\\25\\26\\27\\30\\31\\32\\e\\34\\35\\36\"\n) ],
-    #[__LINE__, q($byte_str\n), qq(byte_str=\"\\n\\x{B}\\f\\r\\x{E}\\x{F}\\x{10}\\x{11}\\x{12}\\x{13}\\x{14}\\x{15}\\x{16}\\x{17}\\x{18}\\x{19}\\x{1A}\\e\\x{1C}\\x{1D}\\x{1E}\"\n) ],
+    (CPICS_DEFAULT ? (
+     [__LINE__, q($byte_str\n), qq(byte_str=\"\N{SYMBOL FOR NEWLINE}\\13\N{SYMBOL FOR FORM FEED}\N{SYMBOL FOR CARRIAGE RETURN}\\16\\17\\20\\21\\22\\23\\24\\25\\26\\27\\30\\31\\32\N{SYMBOL FOR ESCAPE}\\34\\35\\36\"\n) ]
+    ):(
+     [__LINE__, q($byte_str\n), qq(byte_str=\"\\n\\13\\f\\r\\16\\17\\20\\21\\22\\23\\24\\25\\26\\27\\30\\31\\32\\e\\34\\35\\36\"\n) ],
+     #[__LINE__, q($byte_str\n), qq(byte_str=\"\\n\\x{B}\\f\\r\\x{E}\\x{F}\\x{10}\\x{11}\\x{12}\\x{13}\\x{14}\\x{15}\\x{16}\\x{17}\\x{18}\\x{19}\\x{1A}\\e\\x{1C}\\x{1D}\\x{1E}\"\n) ],
+    )),
 
     [__LINE__, q($flex\n), qq(flex=\"Lexical in sub f\"\n) ],
     [__LINE__, q($$flex_ref\n), qq(\$\$flex_ref=\"Lexical in sub f\"\n) ],
@@ -614,16 +613,22 @@ sub get_closure(;$) {
     [__LINE__, q(${^MATCH}\n), qq(\${^MATCH}=\"GroupA.GroupB\"\n) ],
     [__LINE__, q($.\n), qq(\$.=1234\n) ],
     [__LINE__, q($NR\n), qq(NR=1234\n) ],
-    [__LINE__, q($/\n), qq(\$/=\"\N{SYMBOL FOR NEWLINE}\"\n) ],
-    #[__LINE__, q($/\n), qq(\$/=\"\\n\"\n) ],
+    (CPICS_DEFAULT ? (
+     [__LINE__, q($/\n), qq(\$/=\"\N{SYMBOL FOR NEWLINE}\"\n) ],
+    ):(
+     [__LINE__, q($/\n), qq(\$/=\"\\n\"\n) ],
+    )),
     [__LINE__, q($\\\n), qq(\$\\=undef\n) ],
     [__LINE__, q($"\n), qq(\$\"=\" \"\n) ],
     [__LINE__, q($~\n), qq(\$~=\"STDOUT\"\n) ],
     #20 :
     [__LINE__, q($^\n), qq(\$^=\"STDOUT_TOP\"\n) ],
-    [__LINE__, q($:\n), qq(\$:=\" \N{SYMBOL FOR NEWLINE}-\"\n) ],
-    #[__LINE__, q($:\n), qq(\$:=\" \\n-\"\n) ],
-    [__LINE__, q($^L\n), qq(\$^L=\"\N{SYMBOL FOR FORM FEED}\"\n) ],
+    (CPICS_DEFAULT ? (
+     [__LINE__, q($:\n), qq(\$:=\" \N{SYMBOL FOR NEWLINE}-\"\n) ],
+     [__LINE__, q($^L\n), qq(\$^L=\"\N{SYMBOL FOR FORM FEED}\"\n) ],
+    ):(
+     [__LINE__, q($:\n), qq(\$:=\" \\n-\"\n) ],
+    )),
     [__LINE__, q($?\n), qq(\$?=0\n) ],
     [__LINE__, q($[\n), qq(\$[=0\n) ],
     [__LINE__, q($$\n), qq(\$\$=$$\n) ],
@@ -649,7 +654,11 @@ sub get_closure(;$) {
 )
 EOF
     [__LINE__, q($#_\n), qq(\$#_=1\n) ],
-    [__LINE__, q($@\n), qq(\$\@=\"FAKE DEATH\N{SYMBOL FOR NEWLINE}\"\n) ],
+    (CPICS_DEFAULT ? (
+     [__LINE__, q($@\n), qq(\$\@=\"FAKE DEATH\N{SYMBOL FOR NEWLINE}\"\n) ],
+    ):(
+     [__LINE__, q($@\n), qq(\$\@=\"FAKE DEATH\\n\"\n) ],
+    )),
     #37 :
     map({
       my ($LQ,$RQ) = (/^(.)(.)$/) or die "bug";

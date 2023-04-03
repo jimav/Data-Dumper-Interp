@@ -220,7 +220,8 @@ $Foldwidth      = undef        unless defined $Foldwidth;  # undef auto-detects
 $Foldwidth1     = undef        unless defined $Foldwidth1; # override for 1st
 
 # The following override Data::Dumper defaults
-$Useqq          = "utf8:controlpics" unless defined $Useqq;
+#$Useqq          = "unicode:controlpic" unless defined $Useqq;
+$Useqq          = "unicode" unless defined $Useqq;
 $Quotekeys      = 0            unless defined $Quotekeys;
 $Sortkeys       = \&__sortkeys unless defined $Sortkeys;
 $Sparseseen     = 1            unless defined $Sparseseen;
@@ -1724,7 +1725,7 @@ value, e.g. "A.20" sorts before "A.100".  See C<Data::Dumper> documentation.
 
 =head2 Useqq
 
-The default is "unicode:controlpic" except for
+The default is "unicode" except for
 functions/methods with 'q' in their name, which force C<Useqq(0)>.
 
 0 means generate 'single quoted' strings when possible.
@@ -1733,7 +1734,7 @@ functions/methods with 'q' in their name, which force C<Useqq(0)>.
 Non-ASCII charcters will be shown as hex escapes.
 
 Otherwise generate "double quoted" strings enhanced according to option
-keywords given as a :-separated list, e.g. Useqq("unicode:controlpic").
+keywords given as a :-separated list, e.g. Useqq("unicode:controlpics").
 The avilable options are:
 
 =over 4
@@ -1744,7 +1745,7 @@ All printable
 characters are shown as themselves rather than hex escapes, and
 '\n', '\t', etc. are shown for common ASCII control codes.
 
-=item "controlpic"
+=item "controlpics"
 
 Show ASCII control characters using single "control picture" characters,
 for example '␤' is shown for newline instead of '\n'.

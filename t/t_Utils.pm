@@ -133,6 +133,12 @@ sub _check_end($$$) {
   goto &ok_with_lineno;
 }
 
+sub visFoldwidth() {
+  "Data::Dumper::Interp::Foldwidth=".u($Data::Dumper::Interp::Foldwidth)
+ ." Foldwidth1=".u($Data::Dumper::Interp::Foldwidth1)
+ .($Data::Dumper::Interp::Foldwidth ? ("\n".("." x $Data::Dumper::Interp::Foldwidth)) : "")
+}
+
 # Nicer alternative to check() when 'expected' is a literal string, not regex
 sub checkeq_literal($$$) {
   my ($desc, $exp, $act) = @_;
