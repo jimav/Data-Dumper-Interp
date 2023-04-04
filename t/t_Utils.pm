@@ -26,8 +26,8 @@ our @EXPORT_OK = qw/$showstr_maxlen @quotes/;
 use Test::More;
 use Carp;
 
-sub bug(@) { @_=("BUG:",@_); goto &Carp::confess }
-sub oops(@) { @_=("Internal oops! ",@_); goto &Carp::confess }
+sub bug(@) { @_=("BUG FOUND:",@_); goto &Carp::confess }
+sub oops(@) { @_=("oops! ",@_); goto &Carp::confess }
 
 sub show_empty_string(_) {
   $_[0] eq "" ? "<empty string>" : $_[0]
@@ -131,12 +131,6 @@ sub _check_end($$$) {
   diag "**********\n${errmsg}***********\n" if $errmsg;
   @_ = ( !$errmsg, $test_label );
   goto &ok_with_lineno;
-}
-
-sub visFoldwidth() {
-  "Data::Dumper::Interp::Foldwidth=".u($Data::Dumper::Interp::Foldwidth)
- ." Foldwidth1=".u($Data::Dumper::Interp::Foldwidth1)
- .($Data::Dumper::Interp::Foldwidth ? ("\n".("." x $Data::Dumper::Interp::Foldwidth)) : "")
 }
 
 # Nicer alternative to check() when 'expected' is a literal string, not regex

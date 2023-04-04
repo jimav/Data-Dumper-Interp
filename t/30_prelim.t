@@ -1,7 +1,8 @@
 #!/usr/bin/env perl
 use FindBin qw($Bin);
 use lib $Bin;
-use t_Setup qw/bug :silent/; # strict, warnings, Test::More, Carp etc.
+use t_Setup qw/:silent/; # strict, warnings, Test::More, Carp etc.
+use t_Utils qw/bug/;
 
 use Data::Dumper::Interp;
 

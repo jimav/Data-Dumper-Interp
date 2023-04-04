@@ -11,7 +11,7 @@ package t_Setup;
 
 require Exporter;
 use parent 'Exporter';
-our @EXPORT = qw/bug silent/;
+our @EXPORT = qw/silent/;
 
 # Do an initial read of $[ so arybase will be autoloaded
 # (prevents corrupting $!/ERRNO in subsequent tests)
@@ -33,6 +33,7 @@ use Encode qw/decode FB_WARN FB_PERLQQ FB_CROAK LEAVE_SRC/;
 use Carp;
 sub _start_silent() {
   confess "nested silent treatments not supported" if $silent_mode;
+  $silent_mode = 1;
 
   my @OUT_layers = grep{ $_ ne "unix" } PerlIO::get_layers(*STDOUT, output=>1);
   open($orig_stdOUT, ">&", \*STDOUT) or die "dup STDOUT: $!";
@@ -45,8 +46,6 @@ sub _start_silent() {
   close STDERR;
   open(STDERR, ">", \$inmem_stdERR) or die "redir STDERR: $!";
   binmode(STDERR); binmode(STDERR, ":utf8");
-
-  $silent_mode = 1;
 }
 sub _finish_silent() {
   confess "not in silent mode" unless $silent_mode;
@@ -97,20 +96,9 @@ sub import {
   #use 5.010;  # say, state
   use 5.011;  # cpantester gets warning that 5.11 is the minimum acceptable
   use 5.018;  # lexical_subs
-  feature->import::into($target, qw/lexical_subs say state/);
+  require feature;
+  feature->import::into($target, qw/state say current_sub lexical_subs/);
   warnings->unimport::out_of($target, "experimental::lexical_subs");
-
-  # Unicode support
-  # Must be done before loading Test::More
-  confess "too late" if defined( &Test::More::ok );
-  use open ':std', ':encoding(UTF-8)';
-  "open"->import::into($target, ':std', ':encoding(UTF-8)');
-  use utf8;
-  utf8->import::into($target);
-
-  # Disable buffering
-  STDERR->autoflush(1);
-  STDOUT->autoflush(1);
 
   # die if obsolete or dangerous syntax is used
   require indirect;
@@ -120,19 +108,47 @@ sub import {
   multidimensional->unimport::out_of($target);
 
   require autovivification;
-  autovivification->unimport::out_of($target);
+  autovivification->unimport::out_of($target,
+                warn => qw/fetch store exists delete/);
+
+  # Unicode support
+  state $initialized;
+  unless ($initialized++) {
+    # This Must be done before loading Test::More
+    confess "Test::More already loaded!" if defined( &Test::More::ok );
+    use open ':std', ':encoding(UTF-8)';
+    "open"->import::into($target, ':std', ':encoding(UTF-8)');
+  
+    # Disable buffering
+    STDERR->autoflush(1);
+    STDOUT->autoflush(1);
+  }
+  require utf8;
+  utf8->import::into($target);
+
+  require Test::More; 
+  Test::More->VERSION('0.98'); # see UNIVERSAL
+  Test::More->import::into($target);
 
   # import things I always or often use into the test case
   require Carp;
   Carp->import::into($target);
 
-  require Test::More; Test::More->VERSION('0.98'); # see UNIVERSAL
-  Test::More->import::into($target);
+  require File::Basename;
+  File::Basename->import::into($target, qw/basename dirname/);
 
+  require List::Util;
+  List::Util->import::into($target, qw/reduce min max first/);
+
+  require File::Spec;
+ 
   require Scalar::Util;
   Scalar::Util->import::into($target, qw/blessed reftype looks_like_number
                                          weaken isweak refaddr/
                             );
+
+  require Cwd;
+  Cwd->import::into($target, qw/getcwd abs_path/);
 
   # Avoid regex performance penalty in Perl <= 5.18
   # if $PREMATCH $MATCH or $POSTMATCH are imported
@@ -140,10 +156,15 @@ sub import {
   require English;
   English->import::into($target, '-no_match_vars' ); 
 
+  unless (Cwd::abs_path(__FILE__) =~ /Data-Dumper-Interp/) {
+    # unless we are being used to test Data::Dumper::Interp ...
+    require Data::Dumper::Interp;
+    Data::Dumper::Interp->import::into($target);
+    $Data::Dumper::Interp::Useqq = 'unicode'; # omit 'controlpic' to get \t etc.
+  }
 
   if (grep{ $_ eq ':silent' } @_) {
     @_ = grep{ $_ ne ':silent' } @_;
-    Carp::confess("multiple uses?") if $silent_mode;
     _start_silent();
   }
 
@@ -157,7 +178,5 @@ END{
     die $errmsg if $errmsg;
   }
 }
-
-sub bug(@) { @_=("BUG:",@_); goto &Carp::confess }
 
 1;

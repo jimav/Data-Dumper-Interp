@@ -1,14 +1,18 @@
 #!/usr/bin/env perl
+BEGIN {
+  unless (($ENV{PERL_PERTURB_KEYS}//"") eq "2") {
+    $ENV{PERL_PERTURB_KEYS} = "2"; # deterministic
+    $ENV{PERL_HASH_SEED} = "0xDEADBEEF";
+    #$ENV{PERL_HASH_SEED_DEBUG} = "1";
+    exec $^X, $0, @ARGV; # for reproducible results
+  }
+}
+
 use FindBin qw($Bin);
 use lib $Bin;
-use t_Setup qw/bug silent/; # strict, warnings, Test::More, Carp etc.
+use t_Setup qw/:silent/; # strict, warnings, Test::More, Carp etc.
+use t_Utils qw/bug/;
 
-unless (($ENV{PERL_PERTURB_KEYS}//"") eq "2") {
-  $ENV{PERL_PERTURB_KEYS} = "2"; # deterministic
-  $ENV{PERL_HASH_SEED} = "0xDEADBEEF";
-  $ENV{PERL_HASH_SEED_DEBUG} = "1";
-  exec $^X, $0, @ARGV; # for reproducible results
-}
 
 use strict; use warnings  FATAL => 'all'; use feature qw(state say); use utf8;
 #use open IO => ':locale';
