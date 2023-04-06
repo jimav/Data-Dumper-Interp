@@ -3,16 +3,18 @@
 # Compile this before anything is modified by t_Setup
 our $test_sub;
 BEGIN {
+  # WHY???  It must be something in Perl which otherwise
+  # is not suppressed, triggering out warning trap error.
   local ${^WARNING_BITS} = 0; # undo -w flag
   $test_sub = sub{ my $x = 42; };
 }
 
 use FindBin qw($Bin);
 use lib $Bin;
-use t_Setup;  # strict, warnings, Test::More, Carp etc.
-use t_Utils qw/displaystr fmt_codestring timed_run 
-               checkeq_literal check @quotes/;
-###FUTURE FIXME: TODO :silent
+use t_Common qw/oops/; # strict, warnings, Carp
+use t_TestCommon ':silent', # Test::More etc.
+                 qw/bug displaystr fmt_codestring timed_run 
+                    checkeq_literal check @quotes/;
 
 $SIG{__WARN__} = sub { confess "warning trapped; @_" };
 

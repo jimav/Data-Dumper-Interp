@@ -1,8 +1,8 @@
 #!/usr/bin/env perl
 use FindBin qw($Bin);
 use lib $Bin;
-use t_Setup qw/:silent/; # strict, warnings, Test::More, Carp etc.
-use t_Utils qw/bug/;
+use t_Common qw/oops/; # strict, warnings, Carp
+use t_TestCommon ':silent', qw/bug/; # Test::More etc.
 
 use Data::Dumper::Interp;
 my $pkgname = "Data::Dumper::Interp";

@@ -1,11 +1,10 @@
 #!/usr/bin/env perl
 use FindBin qw($Bin);
 use lib $Bin;
-use t_Setup qw/:silent/; # strict, warnings, Test::More, Carp etc.
-use t_Utils qw/bug/;
-
-use t_Utils qw/displaystr fmt_codestring timed_run 
-               checkeq_literal check @quotes/;
+use t_Common qw/oops/; # strict, warnings, Carp, etc.
+use t_TestCommon ':silent', # Test::More etc.
+                  qw/bug displaystr fmt_codestring timed_run 
+                     checkeq_literal check @quotes/;
 
 use Data::Dumper::Interp;
 use Scalar::Util qw(refaddr);

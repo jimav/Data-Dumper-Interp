@@ -10,15 +10,11 @@ BEGIN {
 
 use FindBin qw($Bin);
 use lib $Bin;
-use t_Setup qw/:silent/; # strict, warnings, Test::More, Carp etc.
-use t_Utils qw/bug/;
+use t_Common qw/oops/; # strict, warnings, Carp, etc.
+use t_TestCommon ':silent', qw/bug/; # Test::More etc.
 
+use strict; use warnings  FATAL => 'all'; 
 
-use strict; use warnings  FATAL => 'all'; use feature qw(state say); use utf8;
-#use open IO => ':locale';
-use open ':std', ':encoding(UTF-8)';
-select STDERR; $|=1; select STDOUT; $|=1;
-use Carp;
 use POSIX qw(INT_MAX);
 use Math::BigRat ();
 use Math::BigInt ();
