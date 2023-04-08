@@ -65,7 +65,7 @@ for my $modname ( qw/bigint bigfloat bigrat bignum
   if ($INC{$modpath}) {
     no strict 'refs';
     my $path = $INC{$modpath};
-    $path =~ s#^$ENV{HOME}/#\$HOME/# if $ENV{HOME};
+    $path =~ s#^\Q$ENV{HOME}/\E#\$HOME/# if $ENV{HOME};
     diag sprintf "%-24s %s\n",
                  $modname . '@' . u(${"${modname}::VERSION"}),
                  $path;
