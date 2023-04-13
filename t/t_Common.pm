@@ -4,67 +4,50 @@
 # related or neighboring rights to the content of this file.
 # Attribution is requested but is not required.
 
-# Common setup and tools for tests. It always:
-#   Provides (using import::into) strict, warnings, and various packages.
-#   Provides Test::More.
-#   Makes UTF-8 encode/decode the default for all file handles
-#
-# If @ARGV contains -d etc. those options are removed from @ARGV
-# and the corresponding globals are set: $debug, $verbose, $silent.
-
-# This file is identical in all my module distributions.
+# Common setup stuff, not specifically for test cases.
+# This file is intended to be identical in all my module distributions.
 
 package t_Common;
 
-sub hash2str($) {
-  my $href = shift;
-  join("",map{" ${_}=>".($href->{$_}//"u")} sort keys %$href)
+sub hash2str($) { my $h=shift; join("",map{" ${_}=>".($h->{$_}//"u")} sort keys %$h) }
+my ($default_warnbits, $default_pragmas);
+BEGIN {
+  $default_warnbits = ${^WARNING_BITS}//"u";
+  $default_pragmas = ($^H//"u").":".hash2str(\%^H);
 }
-my $default_pragmas = ($^H//"u").":".hash2str(\%^H);
-my $default_warnbits = ${^WARNING_BITS}//"u";
 
 use strict; use warnings  FATAL => 'all'; use feature qw/say state/;
 
 require Exporter;
 use parent 'Exporter';
-our @EXPORT = qw/oops/;
-our @EXPORT_OK = qw/$debug $silent $verbose/;
+our @EXPORT = qw/oops mytempfile mytempdir/;
+our @EXPORT_OK = ();
 
 use Import::Into;
 use Carp;
 
 sub oops(@) { @_=("oops! ",@_); goto &Carp::confess }
 
-# Do an initial read of $[ so arybase will be autoloaded
-# (prevents corrupting $!/ERRNO in subsequent tests)
-eval '$[' // die;
-
 sub import {
   my $target = caller;
 
-  state $initialized;
-  unless ($initialized++) {
+  state $imported_previously;
+  unless ($imported_previously++) {
     # It seems like test cases using Test::More are re-started from
     # the beginning when Test::More is first loaded, and at that point
-    # some non-default pragma is in effect.  So skip this check if
-    # we come here a 2nd time.
+    # some non-default pragma is in effect.  I can't figure any other
+    # reason why we would be imported twice, with non-default settings
+    # the 2nd time.
     
     # Check that the user did not already say "no warnings ..." or somesuch
-    # which we would override.
-    my $level = 0; # ++$level while defined(caller($level+1));
-    my $callers_pragmas = 
-           ((caller($level))[8]//"u").":".hash2str((caller($level))[10]//{});
-    my $callers_warnbits = (caller($level))[9]//"u";
-
-#use Data::Dumper::Interp;
-#warn dvis '##III $default_pragmas $default_warnbits\n      $callers_pragmas $callers_warnbits\n';
-#warn "(pragmas changed)\n" if $callers_pragmas ne $default_pragmas;
-#warn "(warnbits changed)\n" if $callers_warnbits ne $default_warnbits;
-#
+    # I was confused about how to this before, 
+    # see https://rt.cpan.org/Ticket/Display.html?id=147618
+    my $users_warnbits = ${^WARNING_BITS}//"u";
+    my $users_pragmas = ($^H//"u").":".hash2str(\%^H);
     carp "Detected 'use/no warnings/strict' done before importing ",
           __PACKAGE__, "\n(they might be un-done)\n"
-      if ($callers_pragmas ne $default_pragmas 
-            || $callers_warnbits ne $default_warnbits);
+      if ($users_pragmas ne $default_pragmas 
+            || $users_warnbits ne $default_warnbits);
   }
   strict->import::into($target);
   #warnings->import::into($target);
@@ -104,13 +87,19 @@ sub import {
   require File::Basename;
   File::Basename->import::into($target, qw/basename dirname/);
 
-  require File::Temp;
-  File::Temp->import::into($target, qw/tempfile tempdir/);
+  # NO. use mytempfile or mytempdir
+  #require File::Temp;
+  #File::Temp->import::into($target, qw/tempfile tempdir/);
 
   require File::Path;
   File::Path->import::into($target, qw/make_path rmtree/);
 
   require File::Spec;
+  require File::Spec::Functions;
+  File::Spec::Functions->import::into($target, qw/
+    canonpath catdir catfile curdir rootdir updir
+    no_upwards file_name_is_absolute devnull tmpdir splitpath splitdir 
+    abs2rel rel2abs case_tolerant/);
 
   require List::Util;
   List::Util->import::into($target, qw/reduce min max first any all none sum0/);
@@ -137,5 +126,39 @@ sub import {
   # chain to Exporter to export any other importable items
   goto &Exporter::import
 }
+
+use File::Temp 0.23 ();
+
+# These wrappers provide sane defaults:
+#   TMPDIR set and the appropriate clean-up option enabled.
+# In addition, if a single "template" argument is a full filename including
+# suffix (i.e. does not end in ...XXX), then it is split into separate
+# TEMPLATE and SUFFIX arguments for File::Temp
+sub _process_tfargs(@) {
+  return @_ if (scalar(@_) % 2 == 0); # already key => value, ....
+  (local $_, my @rest) = @_;
+  if (s/X([^X]+)$/X/) { unshift @rest, SUFFIX => $1; }
+  (TEMPLATE => $_, @rest)
+}
+sub mytempfile {
+  my @tfargs = _process_tfargs(@_);
+  File::Temp::tempfile(
+    TMPDIR => File::Spec->tmpdir(),
+    UNLINK  =>  1,
+    @tfargs
+  )
+}
+sub mytempdir {
+  my @tfargs = _process_tfargs(@_);
+  File::Temp::tempdir(
+    TMPDIR => File::Spec->tmpdir(),
+    CLEANUP =>  1,
+    @tfargs
+  )
+}
+# prevent direct use of File::Temp by exporting these conflicting stubs
+# ?? Maybe just name our wrappers without the "my" and let them be imported explicitly?
+sub tempfile { confess "call mytempfile instead" }
+sub tempdir  { confess "call mytempdir instead" }
 
 1;

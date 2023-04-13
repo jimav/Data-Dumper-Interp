@@ -30,6 +30,21 @@ package t_TestCommon;
 use strict; use warnings  FATAL => 'all'; use feature qw/say/;
 use v5.16; # must have PerlIO for in-memory files for ':silent';
 
+use Carp;
+BEGIN{
+  # Unicode support
+  # This must be done before loading Test::More to be effective
+  confess "Test::More already loaded!" if defined( &Test::More::ok );
+
+  # Maybe we should just call binmode(encoding...) on STDOUT & STDERR?
+  use open IO => ':encoding(UTF-8)', ':std';
+
+  # Disable buffering
+  STDERR->autoflush(1);
+  STDOUT->autoflush(1);
+}
+use Test::More 0.98; # see UNIVERSAL
+
 require Exporter;
 use parent 'Exporter';
 our @EXPORT = qw/silent
@@ -37,14 +52,22 @@ our @EXPORT = qw/silent
                  rawstr showstr showcontrols displaystr 
                  show_white show_empty_string
                  fmt_codestring 
+                 verif_no_internals_mentioned 
+                 insert_loc_in_evalstr verif_eval_err 
                  timed_run
-                 checkeq_literal check _check_end
+                 checkeq_literal expect1 check _check_end
+                 arrays_eq hash_subset
+                 run_perlscript
+                 @quotes
+                 string_to_tempfile
                 /;
-our @EXPORT_OK = qw/$debug $silent $verbose @quotes/;
+our @EXPORT_OK = qw/$debug $silent $verbose dprint dprintf/;
 
 use Import::Into;
-use Carp;
 use Data::Dumper;
+use Cwd qw/getcwd abs_path/;
+use File::Basename qw/dirname/;
+use t_Common qw/oops mytempfile mytempdir/;
 
 sub bug(@) { @_=("BUG FOUND:",@_); goto &Carp::confess }
 
@@ -59,29 +82,13 @@ GetOptions(
 ) or die "bad args";
 Getopt::Long::Configure("default");
 
-# Do an initial read of $[ so arybase will be autoloaded
-# (prevents corrupting $!/ERRNO in subsequent tests)
-eval '$[' // die;
-
 sub import {
   my $target = caller;
 
-  # Unicode support
-  state $initialized;
-  unless ($initialized++) {
-    # This Must be done before loading Test::More
-    # It seems like the test is re-executed after Test::More starts,
-    # so skip this the 2nd time.
-    confess "Test::More already loaded!" if defined( &Test::More::ok );
-    use open ':std', ':encoding(UTF-8)';
-    "open"->import::into($target, IO => ':encoding(UTF-8)', ':std');
+  # Do an initial read of $[ so arybase will be autoloaded
+  # (prevents corrupting $!/ERRNO in subsequent tests)
+  eval '$[' // die;
 
-    # Disable buffering
-    STDERR->autoflush(1);
-    STDOUT->autoflush(1);
-  }
-  require Test::More;
-  Test::More->VERSION('0.98'); # see UNIVERSAL
   Test::More->import::into($target);
 
   if (grep{ $_ eq ':silent' } @_) {
@@ -93,6 +100,55 @@ sub import {
   goto &Exporter::import
 }
 
+sub dprint(@)   { Test::More::note(@_)               if $debug };
+sub dprintf($@) { Test::More::note($_[0],@_[1..$#_]) if $debug };
+
+sub arrays_eq($$) {
+  my ($a,$b) = @_;
+  return 0 unless @$a == @$b;
+  for(my $i=0; $i <= $#$a; $i++) {
+    return 0 unless $a->[$i] eq $b->[$i];
+  }
+  return 1;
+}
+
+sub hash_subset($@) {
+  my ($hash, @keys) = @_;
+  return undef if ! defined $hash;
+  return { map { exists($hash->{$_}) ? ($_ => $hash->{$_}) : () } @keys }
+}
+
+# string_to_tempfile($string, args => for-mytempfile) 
+# string_to_tempfile($string, pseudo_template) # see mytempfile
+#
+sub string_to_tempfile($@) {
+  my ($string, @tfargs) = @_;
+  my ($fh, $path) = mytempfile(@tfargs);
+  dprint "> Creating $path\n";
+  print $fh $string; 
+  $fh->flush;
+  seek($fh,0,0) or die "seek $path : $!";
+  wantarray ? ($path,$fh) : $path
+}
+
+# Run a Perl script in a sub-process.
+# Plain 'system  path/to/script.pl' does not work in a test environment
+# where the correct Perl executable is not at the front of PATH,
+# and also where -I options might supply library paths.
+# This is usually enclosed in Capture { ... }
+sub run_perlscript(@) {
+  my @cmd = @_;
+  oops unless defined($cmd[0]);
+  VERIF:
+  { open my $fh, "<", $cmd[0] or die "$cmd[0] : $!";
+    while (<$fh>) { last VERIF if /^#!.*perl|^\s*use\s+(?:warnings|\w+::)/; }
+    confess "$cmd[0] does not appear to be a Perl script";
+  }
+  local $ENV{PERL5LIB} = join(":", @INC);
+  system $^X, @cmd;
+}
+
+#--------------- :silent support ---------------------------
 # N.B. It appears, experimentally, that output from ok(), like() and friends
 # is not written to the test process's STDOUT or STDERR, so we do not need
 # to worry about ignoring those normal outputs (somehow everything is
@@ -178,7 +234,49 @@ END{
     }
   }
 }
+#--------------- (end of :silent stuff) ---------------------------
 
+# N.B. package dir might have version like ".../ODF-lpOD_Helper-3.008/..."
+dirname(abs_path(__FILE__)) =~ m#.*/(\w+)-\w[-\w\.]*/# or die "Cant intuit testee module name";
+(my $testee_top_module = $1) =~ s/-/::/g;
+oops unless $testee_top_module;
+
+sub verif_no_internals_mentioned($) { # croaks if references found
+  my $original = shift;
+  return if $Carp::Verbose; 
+
+  local $_ = $original;
+
+  # Ignore glob refs like \*{"..."}
+  s/(?<!\\)\\\*\{"[^"]*"\}//g;
+  
+  # Ignore globs like *main::STDOUT or *main::$f
+  s/(?<!\\)\*\w[\w:\$]*\b//g;
+  
+  # Ignore object refs like Some::Package=THING(hexaddr)
+  s/(?<!\w)\w[\w:\$]*=(?:REF|ARRAY|HASH|SCALAR|CODE|GLOB)\(0x[0-9a-f]+\)//g;
+  
+  # Mask references to our test library files named t_something.pm
+  s#\b(\bt_\w+).pm(\W|$)#<$1 .pm>$2#gs;
+  
+  my $msg;
+  if (/\b(?<hit>${testee_top_module}::[\w:]*)/) {
+    $msg = "ERROR: Log msg or traceback mentions internal package '$+{hit}'"
+  }
+  elsif (/(?<hit>[-.\w\/]+\.pm\b)/s) {
+    $msg = "ERROR: Log msg or traceback mentions non-test .pm file '$+{hit}'"
+  }
+  if ($msg) {
+    my $start = $-[1]; # offset of start of item
+    my $end   = $+[1]; # offset of end+1
+    substr($_,$start,0) = "HERE>>>";
+    substr($_,$end+7,0) = "<<<THERE";
+    local $Carp::Verbose = 0;  # no full traceback 
+    $Carp::CarpLevel++;
+    croak $msg, ":\n«$_»\n";
+  }
+  1 # return true result if we don't croak
+}
 sub show_empty_string(_) {
   $_[0] eq "" ? "<empty string>" : $_[0]
 }
@@ -273,21 +371,33 @@ sub checkeq_literal($$$) {
   $exp = show_white($exp); # stringifies undef
   $act = show_white($act);
   return unless $exp ne $act;
-  my $posn = 0;
+  my $hposn = 0;
+  my $vposn = 0;
   for (0..length($exp)) {
     my $c = substr($exp,$_,1);
     last if $c ne substr($act,$_,1);
-    $posn = $c eq "\n" ? 0 : ($posn + 1);
+    ++$hposn;
+    if ($c eq "\n") {
+      $hposn = 0;
+      ++$vposn;
+    }
   }
   @_ = ( "\n**************************************\n"
-        ."${desc}\n"
+        .($desc ? "${desc}\n" : "")
         ."Expected:\n".displaystr($exp)."\n"
         ."Actual:\n".displaystr($act)."\n"
         # + for opening « or << in the displayed str
-        .(" " x ($posn+length($quotes[0])))."^\n"
-        .visFoldwidth()."\n" ) ;
+        .(" " x ($hposn+length($quotes[0])))."^"
+                          .($vposn > 0 ? "(line ".($vposn+1).")\n" : "\n")
+        ." at line ", (caller(0))[2]."\n"
+        .visFoldwidth()."\n" 
+       ) ;
   #goto &Carp::confess;
   Carp::confess(@_);
+}
+sub expect1($$) {
+  @_ = ("", @_);
+  goto &checkeq_literal;
 }
 
 # Convert a literal "expected" string which contains things which are
@@ -384,6 +494,38 @@ sub check($$@) {
       }
     }
   }
+}
+
+sub verif_eval_err(;$) {  # MUST be called on same line as the 'eval'
+  my ($msg_regex) = @_;
+  my @caller = caller(0);
+  my $ln = $caller[2];
+  my $fn = $caller[1];
+  my $ex = $@;
+  confess "expected error did not occur at $fn line $ln\n",
+          fmtsheet(sheet({package => $caller[0]}))
+    unless $ex;
+
+  if ($ex !~ / at $fn line $ln\.?(?:$|\n)/s) {
+    die "tex";
+    confess "Got UN-expected err (not ' at $fn line $ln'):\n«$ex»\n",
+            fmtsheet(sheet({package => $caller[0]})),
+            "\n";
+  }
+  if ($msg_regex && $ex !~ qr/$msg_regex/) {
+    confess "Got UN-expected err (not matching $msg_regex) at $fn line $ln'):\n«$ex»\n",
+            fmtsheet(sheet({package => $caller[0]})),
+            "\n";
+  }
+  verif_no_internals_mentioned($ex);
+  dprint "Got expected err: $ex\n";
+}
+
+sub insert_loc_in_evalstr($) {
+  my $orig = shift;
+  my ($fn, $lno) = (caller(0))[1,2];
+#use Data::Dumper::Interp; say dvis '###insert_loc_in_evalstr $fn $lno';
+  "# line $lno \"$fn\"\n".$orig
 }
 
 sub timed_run(&$@) {

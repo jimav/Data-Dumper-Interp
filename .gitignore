@@ -31,3 +31,5 @@ MYMETA.*
 /Data-Dumper-Interp-*
 
 .gitnxtver_cache
+
+diff_t_common.bash
