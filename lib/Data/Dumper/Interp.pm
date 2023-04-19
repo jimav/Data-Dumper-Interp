@@ -429,7 +429,7 @@ say "@##repl START item=$item=",_dbvis($item)," rt=",u(reftype($item))," at ",__
 
   my $changed;
 
-  if (! defined reftype($item)) { # a non-ref scalar
+  if (! defined reftype($item) && defined($item)) { # a non-ref scalar
     if ($maxstringwidth) {
       if (!_show_as_number($item)
           && length($item) > $maxstringwidth + length($truncsuffix)) {
@@ -872,6 +872,9 @@ my $anyvname_or_refexpr_re = qr/ ${anyvname_re} | ${curlies_re} /x;
 sub __unesc_unicode() {  # edits $_
   if (/^"/) {
     # Data::Dumper with Useqq(1) outputs wide characters as hex escapes
+    # Note that a BOM is the ZERO WIDTH NO-BREAK SPACE character and
+    # so is considered "Graphical", but we want to see it as hex rather
+    # than "", and probably for other "Format" category Unicode characters.
 
     s/
        \G (?: [^\\]++ | \\[^x] )*+ \K (?<w> \\x\x{7B} (?<hex>[a-fA-F0-9]+) \x{7D} )
@@ -881,7 +884,8 @@ sub __unesc_unicode() {  # edits $_
        $_ = $_ > 0x10FFFF ? "\0" : chr($_); # 10FFFF is Unicode limit
        # Using 'lc' so regression tests do not depend on Data::Dumper's
        # choice of case when escaping wide characters.
-       m<\P{XPosixGraph}|[\0-\177]> ? lc($orig) : $_
+       (m<\P{XPosixGraph}|[\0-\177]> 
+          || m<\p{General_Category=Format}>) ? lc($orig) : $_
      /xesg;
   }
 }
