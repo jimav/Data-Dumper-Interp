@@ -128,28 +128,14 @@ EOF
 
 is( vis {bxxxxxxxxxxxxxxxxxxxxxxxxxbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb=>42},
     do{chomp(local $_=<<'EOF'); $_} );
-{
-  bxxxxxxxxxxxxxxxxxxxxxxxxxbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+{ bxxxxxxxxxxxxxxxxxxxxxxxxxbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
     => 42
 }
 EOF
 
 is( vis [[[[[[[[[[[[[42]]]]]]]]]]]]],
     do{chomp(local $_=<<'EOF'); $_} );
-[
-  [
-    [
-      [
-        [
-          [
-            [
-              [
-                [
-                  [
-                    [
-                      [
-                        [
-                          42
+[ [ [ [ [ [ [ [ [ [ [ [ [ 42
                         ]
                       ]
                     ]
@@ -214,9 +200,7 @@ is( dvis('\%{}'), '\%{}' );
 
 is( Data::Dumper::Interp->new()->Foldwidth(4)->vis( [ [ ], 12345 ] ),
     do{chomp(local $_=<<'EOF'); $_} );
-[
-  [
-  ],
+[ [],
   12345
 ]
 EOF
