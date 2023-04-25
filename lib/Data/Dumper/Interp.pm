@@ -17,7 +17,7 @@ use strict; use warnings FATAL => 'all'; use utf8;
 #use 5.010;  # say, state
 use 5.011;  # cpantester gets warning that 5.11 is the minimum acceptable
 use 5.018;  # lexical_subs
-use feature qw(say state lexical_subs);
+use feature qw(say state lexical_subs current_sub);
 use feature 'lexical_subs'; 
 no warnings "experimental::lexical_subs";
 
@@ -46,8 +46,8 @@ use Data::Dumper ();
 use Carp;
 use POSIX qw(INT_MAX);
 use Encode ();
-use Scalar::Util qw(blessed reftype refaddr looks_like_number);
-use List::Util qw(min max first);
+use Scalar::Util qw(blessed reftype refaddr looks_like_number weaken);
+use List::Util qw(min max first all any);
 use List::Util 1.33 qw(any sum0);
 #use List::Util 1.29 qw(pairmap);
 use Clone ();
@@ -93,20 +93,22 @@ sub addrvis(_) {
 #####################################
 # Internal debug-message utilities
 #####################################
+sub _tf($) { $_[0] ? "T" : "F" }
 sub _dbshow(_) {
   my $v = shift;
   blessed($v) ? "(".blessed($v).")".$v   # stringify with (classname) prefix
               : _dbvis($v)               # number or "string"
 }
-sub _dbvis(_) {
+sub _dbvisnew {
   my $v = shift;
-  chomp( my $s = Data::Dumper->new([$v])->Useqq(1)->Terse(1)->Indent(0)
-                                        ->Sortkeys(\&__sortkeys)->Dump );
+  Data::Dumper->new([$v])->Terse(1)->Indent(0)->Sortkeys(\&__sortkeys)
+}
+sub _dbvis(_) {
+  chomp(my $s = _dbvisnew(shift)->Useqq(1)->Dump);
   $s
 }
 sub _dbvisq(_) {
-  my $v = shift;
-  chomp( my $s = Data::Dumper->new([$v])->Useqq(0)->Terse(1)->Indent(0)->Sortkeys(\&__sortkeys)->Dump );
+  chomp(my $s = _dbvisnew(shift)->Useqq(0)->Dump);
   $s
 }
 sub _dbavis(@) { "(" . join(", ", map{_dbvis} @_) . ")" }
@@ -872,6 +874,14 @@ my $anyvname_re =
 
 my $anyvname_or_refexpr_re = qr/ ${anyvname_re} | ${curlies_re} /x;
 
+sub __unmagic() {  # edits $_
+  s/(['"])([^'"]*?)
+    (?:\Q$magic_noquotes_pfx\E)
+    (.*?)(\1)/$2$3/xgs;
+
+  s/\Q$magic_keepquotes_pfx\E//gs;
+}
+
 sub __unesc_unicode() {  # edits $_
   if (/^"/) {
     # Data::Dumper with Useqq(1) outputs wide characters as hex escapes
@@ -928,79 +938,6 @@ sub __subst_spacedots() {  # edits $_
 }
 
 my $indent_unit;
-my $linelen;
-my $reserved;
-my $outstr;
-my @stack; # [offset_of_start, flags] representing open blocks
-
-# used in @stack flags
-sub BLK_MOVEDDOWN()  {     1 } # block start has been folded back to min indent
-sub BLK_CANTSPACE()  {     2 } # blanks may not (any longer) be inserted
-sub BLK_EXDENTNEXT() {     4 } # next element should be moved down/out 
-sub BLK_HASCHILD()   {     8 }
-sub BLK_CLOSERNEXT() {  0x10 } # next item is non-standard closer (triple)
-sub BLK_MASK()       {  0xFF }
-# used in flags argument
-sub OPENER()         { 0x100 } 
-sub S_CLOSER()       { 0x200 } # standard closer, e.g. } or ] 
-sub NS_CLOSER()      { 0x400 } # non-standard closer: RHS of a => triple
-sub CLOSER()         { S_CLOSER | NS_CLOSER }
-sub NOOP()           { 0x800 } 
-sub FLAGS_MASK()     { 0xFFF }
-my @fxlate = ( 
-  [BLK_MOVEDDOWN , "MOVEDDOWN"],
-  [BLK_CANTSPACE , "CANTSPACE"],
-  [BLK_HASCHILD  , "HASCHILD"],
-  [BLK_CLOSERNEXT, "CLOSERNEXT"],
-  [BLK_EXDENTNEXT, "EXDENTNEXT"],
-  [OPENER        , "OPENER"],
-  [S_CLOSER      , "S_CLOSER"],
-  [NS_CLOSER     , "NS_CLOSER"],
-  [NOOP          , "NOOP"],
-);
-sub _fmt_flags($) {
-  my $flags = shift;
-  my $r = "";
-  foreach (@fxlate) {
-    my ($f, $name) = @$_;
-    if ($flags & $f) {
-      $flags &= ~$f;
-      $r .= "|" if $r;
-      $r .= $name;
-    }
-  }
-  $r .= sprintf("|INVALID 0x%x", $flags) if $flags;
-  $r
-}
-
-my $stack_opener =
-  #"<";
-  #"\N{LEFT VERTICAL BAR WITH QUILL}";
-  "\N{SINGLE LEFT-POINTING ANGLE QUOTATION MARK}";
-my $stack_closer =
-  #">";
-  #"\N{RIGHT VERTICAL BAR WITH QUILL}";
-  "\N{SINGLE RIGHT-POINTING ANGLE QUOTATION MARK}";
-
-sub _fmt_block($) {
-  my $blk = shift;
-  my ($off, $flags) = @$blk;
-  $stack_opener
-     .$off
-     .(($off < 0 || $off >= length($outstr)) 
-        ? "<INVALID>" : "→'".substr($outstr,$off,1)."'")
-     ."("._fmt_flags($flags).")"
-     .$stack_closer
-}
-sub _fmt_stack() { @stack ? (join ",", map{ _fmt_block($_) } @stack) : "()" }
-
-sub __unmagic($) {
-  ${$_[0]} =~ s/(['"])([^'"]*?)
-                (?:\Q$magic_noquotes_pfx\E)
-                (.*?)(\1)/$2$3/xgs;
-
-  ${$_[0]} =~ s/\Q$magic_keepquotes_pfx\E//gs;
-}
 
 sub __mycall(;@) {
   my ($lno, $subcalled) = (caller(1))[2,3];
@@ -1017,307 +954,248 @@ sub _postprocess_DD_result {
   my $spacedots     = $useqq =~ /space/;
   my $qq            = $useqq =~ /qq(?:=(..))?/ ? ($1//'{}') : '';
 
-  oops if @stack or $reserved;
-  $reserved = 0;
-  $linelen = 0;
-  $outstr = "";
   $indent_unit = 2; # make configurable?
-{
-  our $_dbmaxlen = INT_MAX;
-  say "##RAW DD result: ",_dbrawstr($_) if $debug;
-}
 
-  # Fit everything in a single line if possible.
-  #
-  # Otherwise "fold back" block-starters onto their their own line, indented
-  # according to level, beginning at the (second-to-)outer level:
-  #
-  #    [aaa,bbb,[ccc,ddd,[eee,fff,«not enough space for next item»
-  # becomes
-  #    [ aaa,bbb,
-  #      [ccc,ddd,[eee,fff,«next item goes here»
-  #
-  # If necessary fold back additional levels:
-  #    [ aaa,bbb,
-  #      [ ccc,ddd,
-  #        [eee,fff,«next item goes here»
-  #
-  # When a block-starter is folded back, additional space is inserted
-  # before the first sub-item so it will align with the next indent level,
-  # as shown for 'aaa' and 'ccc' above.
-  #
-  # If folding back all block-starters does not provide enough room,
-  # then the current line is folded at the end:
-  #
-  #    [ aaa,bbb,
-  #      [ ccc,ddd,
-  #        [ eee,fff,
-  #          «next items go here»
-  #          «may fold again later if required»
-  #
-  # The insertion of spaces to align the first item in a block sometimes causes
-  # *expansion*, with less available space than before:
-  #
-  #     [[[aaa,bbb,ccc,«next item would go here»
-  # becomes
-  #     [
-  #       [
-  #         [aaa,bbb,ccc,«even less space here !»
-  #
-  # To avoid retroactive line overflows, enough space is reserved to fold back
-  # all unclosed blocks without causing existing content to overflow (unless
-  # a single item is too large, in which case overflow occurs regardless).
-  #
-  # 'key => value' triples are treated as a special kind of "block" so
-  # that they are kept together if possible.
+  if ($debug) {
+    our $_dbmaxlen = INT_MAX;
+    say "##RAW DD result: ",_dbrawstr($_);
+  }
 
-  my $foldwidthN = $foldwidth || INT_MAX;
-  my $maxlinelen = $foldwidth1 || $foldwidthN;
-  my sub _fold_block($$) {
-    my ($bx, $foldposn) = @_;
-    # Insert \n<indentspaces> at $foldposn to indent $bx+1 levels
-    oops if $foldposn <= $stack[$bx]->[0]; # must be after block opener
-    oops if $foldposn < length($outstr) - $linelen; # must be in last line
+  my $top = { tlen => 0, children => [] };
+  my $context = $top;
+  my $prepending = "";
 
-    # If the block has children, insert spacing before the first child
-    # if not already done (as indicated by BLK_CANTSPACE not yet set),
-    # consuming reserved space.  N.B. if there are no children then
-    # no space has been reserved for this block.
-    if ( ($stack[$bx]->[1] & (BLK_CANTSPACE|BLK_HASCHILD)) == BLK_HASCHILD ) {
-      my $spaces = " " x ($indent_unit-1);
-      my $insposn = $stack[$bx]->[0] + 1;
-      $linelen += length($spaces)
-        if $insposn >= length($outstr)-$linelen;
-      substr($outstr, $insposn, 0) = $spaces;
-      $foldposn += length($spaces);
-      foreach (@stack[$bx+1 .. $#stack]) { $_->[0] += length($spaces) }
-      ($reserved -= length($spaces)) >= 0 or oops;
-      $stack[$bx]->[1] |= BLK_CANTSPACE;
-      say "# ",__mycall($bx), "***>space inserted \@ $insposn in bx $bx" if $debug;
+  my sub check_for_triple() {
+    # Called after adding a normal item or a block-closer.
+    # If it is the RHS of a => or = triplet then put (=> RHS)
+    # in a sub-block so they are indented together if the whole thing wraps.
+    my $children = $context->{children};
+    if (@$children >= 3 && $children->[-2] =~ /\A *=>? *\z/) {
+      oops if ref($children->[-3]);
+      my $gchild = {
+        opener   => $children->[-3],
+        children => [ $children->[-2], $children->[-1] ],
+        closer   => "",  # BUG HERE: , appended to empty closer
+        tlen => length($children->[-3])
+                + length($children->[-2])
+                + (ref($children->[-1]) ? $children->[-1]->{tlen}
+                                       : length($children->[-1])),
+        parent => $context,
+      };
+      splice @$children, -3, 3, $gchild;
+      say "###",__mycall(), "UPDATED context: ",_dbvis($context) if $debug;
     }
-    my $indent = ($bx+1) * $indent_unit;
-    # Remove any spaces at what will become end of line before a fold
-    pos($outstr) = max(0, $foldposn - $indent_unit);
-    my $replacelen = $outstr =~ /\G\S*\K(\s++)/gcs ? length($1) : 0;
-    if (pos($outstr) == $foldposn) {
-      $foldposn -= $replacelen;
-    } else {
-      $replacelen = 0;  # did not match immediately preceding the bracket
-    }
-    pos($outstr) = undef;
-    my $delta = 1 + $indent - $replacelen; # \n + spaces
-    my $new_linelen = length($outstr) - $replacelen - $foldposn + $indent;
-    if (1 or $new_linelen < $linelen) { # it will accomplish something useful
-      $linelen = $new_linelen;
-      oops if $stack[$bx]->[0] > $foldposn;
-      $stack[$bx]->[0] += $delta if $stack[$bx]->[0] == $foldposn;
-      oops if $bx < $#stack && $stack[$bx+1]->[0] < $foldposn;
-      foreach ($bx+1 .. $#stack) { $stack[$_]->[0] += $delta }
-      substr($outstr, $foldposn, $replacelen) = "\n" . (" " x $indent);
-      $maxlinelen = $foldwidthN;
-      say "# ",__mycall($bx),"  After: stack=${\_fmt_stack()} length(outstr)=${\length($outstr)} llen=$linelen maxllen=$maxlinelen res=$reserved\n os=",_dbstr($outstr) if $debug;
-    } else {
-      say "# ",__mycall($bx),"  After (NOT FOLDED): stack=${\_fmt_stack()} length(outstr)=${\length($outstr)} llen=$linelen maxllen=$maxlinelen res=$reserved\n os=",_dbstr($outstr) if $debug;
-    }
-  }#_fold_block
-
-  my ($nextitem, $nextflags);
+  }
   my sub atom($;$) {
-    # Queue each item for one "look ahead" cycle before fully processing.
-    (local $_, my $flags) = ($nextitem, $nextflags);
-    ($nextitem, $nextflags) = ($_[0], $_[1]//0);
-    __unmagic(\$nextitem);
+    (local $_, my $mode) = @_;
+    $mode //= "";
 
-    if (/\A[\\\*]+$/) {
-      # Glue backslashes or * onto the front of whatever follows
-      $nextitem = $_ . $nextitem;
-      return;
-    }
-
+    __unmagic ;
     __unesc_unicode          if $unesc_unicode;
     __subst_controlpics      if $controlpics;
     __subst_spacedots        if $spacedots;
     __change_quotechars($qq) if $qq;
 
-    say "###",__mycall(), _dbrawstr($nextitem),"(",_fmt_flags($nextflags),")",
-        " prev:",_dbrawstr($_),"(",_fmt_flags($flags),")", 
-        " stack:", _fmt_stack(), "\n os=",_dbstr($outstr)
+    if ($prepending) { $_ = $prepending . $_; $prepending = ""; }
+
+    say "###",__mycall(), _dbrawstr($_),"($mode)" 
+      ," context:",_dbvisnew($context)->Sortkeys(sub{[qw/tlen children/]})->Dump()
       if $debug;
-
-    return if ($flags & NOOP);
-
-    if (@stack && ($stack[-1]->[1] & BLK_CLOSERNEXT)) {
-      # This is a non-standard "closer": The RHS of a => triple
-      oops if ($flags & CLOSER);
-      $flags |= NS_CLOSER;
-      $stack[-1]->[1] &= ~BLK_CLOSERNEXT;
-      say "###",__mycall(), "BLK_CLOSERNEXT found, curr->NS_CLOSER " if $debug;
-    }
-
-#    if ( !($flags & CLOSER) && @stack && ($stack[-1]->[1] & BLK_EXDENTNEXT)) {
-#      _fold_block($#stack, length($outstr));
-#      $stack[-1]->[1] &= ~BLK_EXDENTNEXT;
-####say "Temp not exdenting...";
-###      my $indent_spaces = sum0(map{ ($_->[1]&BLK_CANTSPACE)?${indent_unit}:1 } @stack);
-###      my $spaces = " " x $indent_spaces;
-###      $outstr .= "\n".$spaces;
-###      $linelen = length($spaces);
-###      #$outstr .= "<A>\n<B>".$spaces."<C>";
-###      say "##***>EXDENTed to align w/sib; spaces=$indent_spaces new ll=$linelen stk=",_fmt_stack()," os=",_dbstr($outstr) if $debug;
-#    }
-
-    if ( !($flags & CLOSER)
-         && @stack
-         && ($stack[-1]->[1] & (BLK_HASCHILD|BLK_CANTSPACE))==0 ) {
-      # First child: Reserve space to insert blanks before it
-      $reserved += ($indent_unit - 1);
-      $stack[-1]->[1] |= BLK_HASCHILD if @stack;
-    }
-    if ( ($flags & CLOSER)
-         && ($stack[-1]->[1] & (BLK_HASCHILD|BLK_CANTSPACE))==BLK_HASCHILD
-         && length() <= ($indent_unit - 1)) {
-      # Closing a block which has reserved space but has not been folded yet;
-      # If the closer is not larger than the reserved space, release the
-      # reserved space so the closer can fit on the same line.
-      $reserved -= ($indent_unit - 1); oops if $reserved < 0;
-      $stack[-1]->[1] |= BLK_CANTSPACE;
-    }
-
-    # Fold enclosing blocks to try to make room
-    while ( $maxlinelen - $linelen < $reserved + length() ) {
-      my $bx = first { ($stack[$_]->[1] & BLK_MOVEDDOWN)==0 } 1..$#stack;
-      last
-        unless defined($bx);
-      my $foldposn = $stack[$bx]->[0];
-      _fold_block($bx-1, $foldposn);
-      $stack[$bx]->[1] |= BLK_MOVEDDOWN;
-    }
-
-    # Fold the innermost block to start a new line if more space is needed,
-    # or to align the next element (indicated by BLK_EXDENTNEXT).
-    # Ignore $reserved if the item is a closer because reserved space will
-    # not be needed if the item fits on the same line.
-    #
-    # If removing trailing spaces makes it fit exactly then remove the spaces.
-    my $deficit = (($flags & CLOSER) ? 0 : $reserved) + length()
-                    - ($maxlinelen - $linelen) ;
-    if ($deficit > 0 && /(\s++)\z/s && length($1) >= $deficit) {
-      s/\s{$deficit}\z// or oops;
-      $deficit = 0;  # e.g. if item is " => "
-    }
-    if (@stack &&
-         ($deficit > 0
-          ||
-          ($stack[-1]->[1] & BLK_EXDENTNEXT)
-         )
-       )
-    {
-      _fold_block($#stack, length($outstr));
-      $stack[-1]->[1] &= ~BLK_EXDENTNEXT;
-      if ($flags & OPENER) {
-        $flags |= BLK_MOVEDDOWN; # born already in left-most position
+    if ($mode eq "prepend_to_next") {
+      $prepending .= $_;
+    } else {
+      if ($mode eq "") { 
+        push @{ $context->{children} }, $_;
+        check_for_triple();
       }
-      s/^\s++//s; # elide leading spaces at start of (indented) item
-    }
-    # If adding a block-closer, first fold back an additional level if
-    # enclosing block(s) were folded, to align the closer with the 
-    # corresponding opener like this:
-    #     [ aaa, bbb,
-    #       ccc, «wrap instead of putting closer here»
-    #     ]
-    #
-    if (@stack 
-          #&& ($flags & (CLOSER | BLK_MOVEDDOWN) == CLOSER) 
-          #&& ($flags & (CLOSER | BLK_CANTSPACE) == CLOSER) 
-          #&& ($flags & CLOSER) 
-          && ($flags & S_CLOSER) 
-          && (length($outstr) - $stack[-1]->[0] > $linelen)) {
-      _fold_block($#stack, length($outstr));
-      # Back up further to prev. indent level so it aligns with it's opener
-      my $removed = substr($outstr,length($outstr)-$indent_unit,INT_MAX,"");
-      oops($removed," stk",_fmt_stack(),"\n os=",_dbstr($outstr)) 
-        unless $removed eq (" " x $indent_unit);
-      s/^\s++//s; # elide leading spaces at start of (indented) item
-    }
-
-    $outstr .= $_; # Append the new atom
-    $linelen += length();
-
-    my $popped;
-    if ($flags & CLOSER) {
-      if ( ($stack[-1]->[1] & (BLK_HASCHILD|BLK_CANTSPACE)) == BLK_HASCHILD ) {
-        # Release reserved space which was not needed
-        $reserved -= ($indent_unit - 1); oops if $reserved < 0;
+      elsif ($mode eq "open") {
+        my $child = {
+          opener => $_,
+          tlen => 0,
+          children => [],
+          closer => undef,
+          parent => $context,
+        };
+        weaken( $child->{parent} );
+        push @{ $context->{children} }, $child;
+        $context = $child;
       }
-      oops if @stack==1 && $reserved != 0;
-      pop @stack;
-      $popped = 1;
-    }
-
-    if ($flags & OPENER) {
-      push @stack, [length($outstr)-length(), $flags & BLK_MASK];
-    } 
-
-#    if (@stack && $stack[-1]->[1] & BLK_TRIPLE) {
-#      say "     Closing TRIPLE" if $debug;
-#      $reserved -= ($indent_unit - 1)  # can never happen!
-#        if ($stack[-1]->[1] & (BLK_HASCHILD|BLK_CANTSPACE))==BLK_HASCHILD;
-#      pop @stack;
-#      $popped = 1;
-#    }
-#
-    if ($popped) { # 4/21/2023
-      # If we just ended a block and enclosing block(s) were folded, 
-      # mark to exdent the following item (if not a closer) so it aligns 
-      # vertically with it's siblings:
-      # [
-      #   [ ...
-      #   ], #the current item
-      #   «next item goes here»
-      #
-      # {
-      #   key1 => [ ... ], # current item is the ], closer
-      #   «next item goes here»
-      #
-      if (@stack   # not the outermost block
-           && length($outstr) - $stack[-1]->[0] > $linelen # enclosing was folded
-           && ! ($nextflags & CLOSER)) {
-        $stack[-1]->[1] |= BLK_EXDENTNEXT;
-        say "##***>Set EXDENTNEXT on enclosing block: ",_fmt_stack()," os=",_dbstr($outstr) if $debug;
+      elsif ($mode eq "close") {
+        oops if defined($context->{closer});
+        $context->{closer} = $_;
+        $context->{tlen} += length($_);
+        $context = $context->{parent}; # undef if closing the top item
+        check_for_triple();
+      }
+      elsif ($mode eq "append_to_prev") {
+        my $prev = $context; 
+        while (@{$prev->{children}}==0) { $prev = $prev->{parent}; }
+        TARGET: {
+          my $item = $prev->{children}->[-1];
+          if (ref $item) {
+            if ($item->{closer} eq "") {
+              my $lastchild = $item->{children}->[-1] // oops;
+              if (! ref $lastchild) {
+                $item->{children}->[-1] .= $_;
+say "# # empty closer, APPENDED '$_' DIRECTLY TO CHILD[-1]: ",_dbstr($item->{children}->[-1]);
+              } else {
+                $prev = $lastchild;
+say "# # empty closer, trying child[-1]:", _dbvis($prev);
+                next TARGET;
+              }
+            } else {
+              $item->{closer} .= $_;
+say "# # APPENDED '$_' TO CLOSER: ",_dbstr($prev->{children}->[-1]->{closer});
+            }
+          } else {
+            oops if $item eq "";
+            $prev->{children}->[-1] .= $_;
+say "# # APPENDED '$_' TO SCALAR: ",_dbstr($prev->{children}->[-1]);
+          }
+        }
+      }
+      else {
+        oops "mode=",_dbvis($mode);
+      }
+      my $c = $context;
+      while(defined $c) {
+        $c->{tlen} += length($_);
+        $c = $c->{parent};
       }
     }
-
-    say "#  ",__mycall(), " FINAL: stack=", _fmt_stack(), "\n os=",_dbstr($outstr)
-      if $debug;
   }#atom
-  my sub pushlevel($) { push @_, OPENER; goto &atom } # so debug trace shows our caller
-  my sub poplevel($)  { push @_, S_CLOSER; goto &atom }
-  my sub triple($) {
-    my $item = shift;
-    say "##triple '$item'" if $debug;
-    # Make a "key => value" or "var = value" triple be a block,
-    # to keep together if possible
-    oops _fmt_flags($nextflags) if $nextflags != 0;
-    $nextflags |= (OPENER | BLK_CANTSPACE); # the LHS
-    atom( $item, 0 );  # queue " => " or " = "
-    atom( "", NOOP );  # push through the =>
-    $stack[-1]->[1] |= BLK_CLOSERNEXT;
-  }
-  my sub commasemi($) {
-    # Glue to the end of the pending item, so they always appear together
-    $nextitem .= $_[0];
-  }
-#  my sub space() {
-#    return if substr($outstr,-1,1) eq " ";
-#    atom(" ");
-#  }
 
-  $nextitem = "";
-  $nextflags = NOOP;
+  # There is a trade-off between compactness (e.g. want a single line when
+  # possible), and ease of reading large structures.
+  #
+  # At any nesting level, if everything (including any nested levels) fits
+  # on a single line, then that part is output without folding;
+  #
+  # When folding is necessary, IF any enclosed siblings themselves will
+  # not fit on a single line, then ALL siblings are wrapped to the start
+  # of their own lines, so the siblings line up vertically; however
+  # if all the siblings individually can fit without folding, then the sibs
+  # are packed multiple per line, wrapping only between siblings:
+  #
+  #    [aaa,bbb,[ccc,ddd,[eee,fff,hhhhhhhhhhhhhhhhhhhhh,{key => value}]]]
+  #
+  # might be shown as
+  #    [ aaa,bbb,  # N.B. space inserted before aaa to line up with next level
+  #      [ ccc,ddd,  # packed because all siblings fit individually
+  #        [eee,fff,hhhhhhhhhhhhhhhhhhhhh,{key => value}] # entirely fits 
+  #      ]
+  #    ]
+  # but if Foldwidth is smaller then like this:
+  #    [ aaa,bbb,  
+  #      [ ccc,  # sibs vertically-aligned because not all of them fit
+  #        ddd,
+  #        [ eee,fff,  # but within this level, all siblings fit
+  #          hhhhhhhhhhhhhhhhhhhhh, 
+  #          {key => value}
+  #        ]
+  #      ]
+  #    ]
+  # or if Foldwidth is very small then:
+  #    [ aaa,
+  #      bbb,  
+  #      [ ccc,
+  #        ddd,
+  #        [ eee,
+  #          fff,
+  #          hhhhhhhhhhhhhhhhhhhhh, 
+  #          { key 
+  #            => 
+  #            value 
+  #          }
+  #        ]
+  #      ]
+  #    ]
+  #
+  # Note: Indentation is done regardless of Foldwidth, so deeply nested
+  # structures may extend beyond Foldwidth even if all elements are short.
+  
+  my $foldwidthN = $foldwidth || INT_MAX;
+  my $maxlinelen = $foldwidth1 || $foldwidthN;
+  my $outstr; 
+  my $linelen;
+  our $level;
+  my sub expand_children($) {
+    my $parent = shift; 
+    # $level is already set appropriately for $parent->{children},
+    # and the first child should be immediately appended to $outstr
+    # (which has been indented or in run-together position as appropriate).
+    #
+    # Intially we are called with a fake parent ($top) containing
+    # the top-most item as its child, with $level==0; this puts the top
+    # item at the left margin.
+    #
+    # If all children individually fit then run them all together, 
+    # wrapping only between siblings; otherwise start each sibling on 
+    # it's own line so they line up vertically.
+
+    my $available = $maxlinelen - $linelen;
+    my $run_together = all{ (ref() ? $_->{tlen} : length) <= $available }
+                          @{$parent->{children}};
+      
+    my $indent_width = $level * $indent_unit;
+    my $indent = ' ' x $indent_width;
+
+    say "###",__mycall(), "level $level, avail=$available",
+        " rt=",_tf($run_together),
+        " indw=$indent_width ll=$linelen maxll=$maxlinelen : ",
+        "{ tlen=",$parent->{tlen}," }",
+        "\n  os=",_dbstr($outstr) if $debug;
+
+    #oops(_dbavis($linelen,$indent_width)) unless $linelen >= $indent_width;
+
+    my $first = 1;
+    for my $child (@{$parent->{children}}) {
+      my $child_len = ref($child) ? $child->{tlen} : length($child);
+      my $fits = ($child_len <= $available);
+
+      if (!$first && (!$fits || !$run_together)) {
+        # start a second+ line
+        $outstr .= "\n$indent";
+        $linelen = $indent_width;
+
+        # elide any initial spaces after wrapping, e.g. in " => "
+        $child =~ s/^ +// unless ref($child);
+        say "#     (level $level): Pre-WRAP; ll=$linelen os=",_dbstr($outstr) if $debug;
+      }
+
+      if (ref($child)) {
+        ++$level;
+        $outstr .= $child->{opener};
+        $linelen = $indent_width + length($child->{opener});
+        if (! $fits) {
+          # Wrap before first child
+          $outstr .= "\n$indent" . (' ' x $indent_unit);
+          say "#     (l $level): Wrap after opener: os=",_dbstr($outstr) if $debug;
+        }
+        __SUB__->($child); 
+        if (! $fits) {
+          # Wrap after close if we wrapped before opening
+          $outstr .= "\n$indent";
+          $linelen = $indent_width;
+          say "#     (l $level): Wrap after closer; ll=$linelen os=",_dbstr($outstr) if $debug;
+        }
+        $outstr .= $child->{closer};
+        $linelen += length($child->{closer});
+        --$level;
+      } else {
+        $outstr .= $child;
+        $linelen += length($child);
+        say "#     (level $level): appended SCALAR ",_dbstr($child) if $debug;
+      }
+      $available = $maxlinelen - $linelen;
+      $first = 0;
+    }
+  }#expand_children
+  
 
   while ((pos()//0) < length) {
-       if (/\G[\\\*]/gc)                         { atom($&) } # glued fwd
-    elsif (/\G[,;]/gc)                           { commasemi($&) }
+       if (/\G[\\\*]/gc)                         { atom($&, "prepend_to_next") }
+    elsif (/\G[,;]/gc)                           { atom($&, "append_to_prev") }
     elsif (/\G"(?:[^"\\]++|\\.)*+"/gsc)          { atom($&) } # "quoted"
     elsif (/\G'(?:[^'\\]++|\\.)*+'/gsc)          { atom($&) } # 'quoted'
     elsif (m(\Gqr/(?:[^\\\/]++|\\.)*+/[a-z]*)gsc){ atom($&) } # Regexp
@@ -1326,20 +1204,27 @@ sub _postprocess_DD_result {
     elsif (/\Gsub\s*${curlies_re}/gc)            { atom($&) } # sub{...}
 
     # $VAR1->[ix] $VAR1->{key} or just $varname
-    elsif (/\G(?:my\s+)?\$(?:${userident_re}|\s*->\s*|${balanced_re})++/gsc) { atom($&) }
+    elsif (/\G(?:my\s+)?\$(?:${userident_re}|\s*->\s*|${balanced_re}+)++/gsc) { atom($&) }
 
     elsif (/\G\b[A-Za-z_][A-Za-z0-9_]*+\b/gc) { atom($&) } # bareword?
     elsif (/\G-?\d[\deE\.]*+\b/gc)            { atom($&) } # number
-    elsif (/\G\s*=>\s*/gc)                    { triple($&) }
-    elsif (/\G\s*=(?=[\w\s'"])\s*/gc)         { triple($&) }
+    elsif (/\G\s*=>\s*/gc)                    { atom($&) }
+    elsif (/\G\s*=(?=[\w\s'"])\s*/gc)         { atom($&) }
     elsif (/\G:*${pkgname_re}/gc)             { atom($&) }
-    elsif (/\G[\[\{\(]/gc) { pushlevel($&) }
-    elsif (/\G[\]\}\)]/gc) { poplevel($&)  }
+    elsif (/\G[\[\{\(]/gc)                    { atom($&, "open") }
+    elsif (/\G[\]\}\)]/gc)                    { atom($&, "close") }
     elsif (/\G\s+/sgc)                        {          }
     else { oops "UNPARSED ",_dbstr(substr($_,pos//0,30)."..."),"  ",_dbstrposn($_,pos()//0);
     }
   }
-  atom(""); # push through the lookahead item
+  oops "Dangling prepend ",_dbstr($prepending) if $prepending;
+
+  say "top:\n",_dbvisnew($top)->Sortkeys(sub{[qw/tlen opener closer children/]})->Dump if $debug;
+
+  $outstr = "";
+  $linelen = 0;
+  $level = 0;
+  expand_children($top); 
 
   if (($vistype//'s') eq 's') {
   }
@@ -1350,7 +1235,6 @@ sub _postprocess_DD_result {
     $outstr =~ s/\A\{/(/ && $outstr =~ s/\}\z/)/s or oops;
   }
   else { oops }
-  oops("leftover stk=",_fmt_stack(),"\n os=",_dbstr($outstr)) if @stack;
   $outstr
 } #_postprocess_DD_result {
 
