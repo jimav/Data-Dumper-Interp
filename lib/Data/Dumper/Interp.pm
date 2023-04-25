@@ -87,6 +87,8 @@ sub addrvis(_) {
 }
 
 =for Pod::Coverage addrvis_forget
+
+=for Pod::Coverage viso visoq
  
 =cut
 
@@ -94,6 +96,7 @@ sub addrvis(_) {
 # Internal debug-message utilities
 #####################################
 sub _tf($) { $_[0] ? "T" : "F" }
+sub _showfalse(_) { $_[0] ? $_[0] : 0 }
 sub _dbshow(_) {
   my $v = shift;
   blessed($v) ? "(".blessed($v).")".$v   # stringify with (classname) prefix
@@ -101,7 +104,8 @@ sub _dbshow(_) {
 }
 sub _dbvisnew {
   my $v = shift;
-  Data::Dumper->new([$v])->Terse(1)->Indent(0)->Sortkeys(\&__sortkeys)
+  Data::Dumper->new([$v])->Terse(1)->Indent(0)->Quotekeys(0)
+              ->Sortkeys(\&__sortkeys)->Pair("=>")
 }
 sub _dbvis(_) {
   chomp(my $s = _dbvisnew(shift)->Useqq(1)->Dump);
@@ -138,8 +142,8 @@ sub oops(@) { @_ = ("\n".__PACKAGE__." oops:",@_,"\n  "); goto &Carp::confess }
 
 use Exporter 'import';
 our @EXPORT    = qw(visnew
-                    vis  ovis  avis  alvis  ivis  dvis  hvis  hlvis
-                    visq ovisq avisq alvisq ivisq dvisq hvisq hlvisq
+                    vis  viso  avis  avisl  ivis  dvis  hvis  hvisl
+                    visq visoq avisq avislq ivisq dvisq hvisq hvislq
                     addrvis refvis
                     u quotekey qsh qshlist __forceqsh qshpath);
 
@@ -329,16 +333,16 @@ sub visnew()  { __PACKAGE__->new() }  # shorthand
 # These can be called as *FUNCTIONS* or as *METHODS*
 sub vis(_)    { &__getobj_s ->_Vistype('s')->Dump; }
 sub visq(_)   { &__getobj_s ->_Vistype('s')->Useqq(0)->Dump; }
-sub ovis(_)   { &__getobj_s ->_Vistype('s')->Useqq(0)->Objects(0)->Dump; }
-sub ovisq(_)  { &__getobj_s ->_Vistype('s')->Objects(0)->Dump; }
+sub viso(_)   { &__getobj_s ->_Vistype('s')->Objects(0)->Useqq(0)->Dump; }
+sub visoq(_)  { &__getobj_s ->_Vistype('s')->Objects(0)->Dump; }
 sub avis(@)   { &__getobj_a ->_Vistype('a')->Dump; }
 sub avisq(@)  { &__getobj_a ->_Vistype('a')->Useqq(0)->Dump; }
 sub hvis(@)   { &__getobj_h ->_Vistype('h')->Dump; }
 sub hvisq(@)  { &__getobj_h ->_Vistype('h')->Useqq(0)->Dump; }
-sub alvis(@)  { substr &avis,  1, -1 }  # bare List without parenthesis
-sub alvisq(@) { substr &avisq, 1, -1 }
-sub hlvis(@)  { substr &hvis,  1, -1 }
-sub hlvisq(@) { substr &hvisq, 1, -1 }
+sub avisl(@)  { substr &avis,  1, -1 }  # bare List without parenthesis
+sub avislq(@) { substr &avisq, 1, -1 }
+sub hvisl(@)  { substr &hvis,  1, -1 }
+sub hvislq(@) { substr &hvisq, 1, -1 }
 
 # TODO: Integrate this more deeply to avoid duplicating information when
 #       $v -> blessed and object does *not* stringify.  Currently we get:
@@ -965,27 +969,6 @@ sub _postprocess_DD_result {
   my $context = $top;
   my $prepending = "";
 
-  my sub check_for_triple() {
-    # Called after adding a normal item or a block-closer.
-    # If it is the RHS of a => or = triplet then put (=> RHS)
-    # in a sub-block so they are indented together if the whole thing wraps.
-    my $children = $context->{children};
-    if (@$children >= 3 && $children->[-2] =~ /\A *=>? *\z/) {
-      oops if ref($children->[-3]);
-      my $gchild = {
-        opener   => $children->[-3],
-        children => [ $children->[-2], $children->[-1] ],
-        closer   => "",  # BUG HERE: , appended to empty closer
-        tlen => length($children->[-3])
-                + length($children->[-2])
-                + (ref($children->[-1]) ? $children->[-1]->{tlen}
-                                       : length($children->[-1])),
-        parent => $context,
-      };
-      splice @$children, -3, 3, $gchild;
-      say "###",__mycall(), "UPDATED context: ",_dbvis($context) if $debug;
-    }
-  }
   my sub atom($;$) {
     (local $_, my $mode) = @_;
     $mode //= "";
@@ -999,21 +982,20 @@ sub _postprocess_DD_result {
     if ($prepending) { $_ = $prepending . $_; $prepending = ""; }
 
     say "###",__mycall(), _dbrawstr($_),"($mode)" 
-      ," context:",_dbvisnew($context)->Sortkeys(sub{[qw/tlen children/]})->Dump()
+      ,"\n context:",_dbvisnew($context)->Sortkeys(sub{[grep{exists $_[0]->{$_}} qw/O C tlen children CLOSE_AFTER_NEXT/]})->Dump()
       if $debug;
     if ($mode eq "prepend_to_next") {
       $prepending .= $_;
     } else {
       if ($mode eq "") { 
         push @{ $context->{children} }, $_;
-        check_for_triple();
       }
       elsif ($mode eq "open") {
         my $child = {
-          opener => $_,
+          O => $_,
           tlen => 0,
           children => [],
-          closer => undef,
+          C => undef,
           parent => $context,
         };
         weaken( $child->{parent} );
@@ -1021,36 +1003,23 @@ sub _postprocess_DD_result {
         $context = $child;
       }
       elsif ($mode eq "close") {
-        oops if defined($context->{closer});
-        $context->{closer} = $_;
+        oops if defined($context->{C});
+        $context->{C} = $_;
         $context->{tlen} += length($_);
         $context = $context->{parent}; # undef if closing the top item
-        check_for_triple();
       }
       elsif ($mode eq "append_to_prev") {
-        my $prev = $context; 
-        while (@{$prev->{children}}==0) { $prev = $prev->{parent}; }
-        TARGET: {
-          my $item = $prev->{children}->[-1];
-          if (ref $item) {
-            if ($item->{closer} eq "") {
-              my $lastchild = $item->{children}->[-1] // oops;
-              if (! ref $lastchild) {
-                $item->{children}->[-1] .= $_;
-say "# # empty closer, APPENDED '$_' DIRECTLY TO CHILD[-1]: ",_dbstr($item->{children}->[-1]);
-              } else {
-                $prev = $lastchild;
-say "# # empty closer, trying child[-1]:", _dbvis($prev);
-                next TARGET;
-              }
-            } else {
-              $item->{closer} .= $_;
-say "# # APPENDED '$_' TO CLOSER: ",_dbstr($prev->{children}->[-1]->{closer});
+        my $prev = $context;
+        { #block for 'redo'
+          oops unless @{$prev->{children}} > 0;
+          if (ref($prev->{children}->[-1] // oops("No previous!"))) {
+            $prev = $prev->{children}->[-1];
+            if (! $prev->{C}) { # empty or not-yet-read closer?
+              redo; # ***
             }
+            $prev->{C} .= $_;
           } else {
-            oops if $item eq "";
             $prev->{children}->[-1] .= $_;
-say "# # APPENDED '$_' TO SCALAR: ",_dbstr($prev->{children}->[-1]);
           }
         }
       }
@@ -1062,8 +1031,31 @@ say "# # APPENDED '$_' TO SCALAR: ",_dbstr($prev->{children}->[-1]);
         $c->{tlen} += length($_);
         $c = $c->{parent};
       }
+      if ($context->{CLOSE_AFTER_NEXT}) {
+        oops(_dbvis($context)) if defined($context->{C});
+        $context->{C} = "";
+        $context = $context->{parent};
+      }
     }
   }#atom
+
+  my sub equal_greater($) {  # =>
+    my $lhs = $context->{children}->[-1] // oops;
+    oops if ref($lhs);
+    my $newchild = {
+      O => "",
+      tlen => length($lhs),
+      children => [ $lhs ],
+      C => undef,
+      parent => $context,
+    };
+    weaken($newchild->{parent});
+    $context->{children}->[-1] = $newchild;
+    $context = $newchild;
+    atom($_[0]); # the " => "
+    oops unless $context == $newchild;
+    $context->{CLOSE_AFTER_NEXT} = 1;
+  }
 
   # There is a trade-off between compactness (e.g. want a single line when
   # possible), and ease of reading large structures.
@@ -1075,7 +1067,7 @@ say "# # APPENDED '$_' TO SCALAR: ",_dbstr($prev->{children}->[-1]);
   # not fit on a single line, then ALL siblings are wrapped to the start
   # of their own lines, so the siblings line up vertically; however
   # if all the siblings individually can fit without folding, then the sibs
-  # are packed multiple per line, wrapping only between siblings:
+  # are packed multiple per line, wrapping only when needed between siblings:
   #
   #    [aaa,bbb,[ccc,ddd,[eee,fff,hhhhhhhhhhhhhhhhhhhhh,{key => value}]]]
   #
@@ -1134,16 +1126,26 @@ say "# # APPENDED '$_' TO SCALAR: ",_dbstr($prev->{children}->[-1]);
     # it's own line so they line up vertically.
 
     my $available = $maxlinelen - $linelen;
+    my $indent_width = $level * $indent_unit;
+
     my $run_together = all{ (ref() ? $_->{tlen} : length) <= $available }
                           @{$parent->{children}};
+
+    if (!$run_together
+        && @{$parent->{children}}==3 
+        && !ref(my $item=$parent->{children}->[1])) {
+      # Concatenate (key,=>) if possible 
+      $run_together = 1 if $item =~ /\A *=> *\z/;
+      say "#     (level $level): Running together $parent->{children}->[0] => value" if $debug;
+    }
       
-    my $indent_width = $level * $indent_unit;
     my $indent = ' ' x $indent_width;
 
     say "###",__mycall(), "level $level, avail=$available",
         " rt=",_tf($run_together),
         " indw=$indent_width ll=$linelen maxll=$maxlinelen : ",
-        "{ tlen=",$parent->{tlen}," }",
+        #"{ tlen=",$parent->{tlen}," }",
+        _dbvisnew($parent)->Sortkeys(sub{[grep{exists $_[0]->{$_}} qw/O C tlen CLOSE_AFTER_NEXT/]})->Dump(),
         "\n  os=",_dbstr($outstr) if $debug;
 
     #oops(_dbavis($linelen,$indent_width)) unless $linelen >= $indent_width;
@@ -1151,41 +1153,69 @@ say "# # APPENDED '$_' TO SCALAR: ",_dbstr($prev->{children}->[-1]);
     my $first = 1;
     for my $child (@{$parent->{children}}) {
       my $child_len = ref($child) ? $child->{tlen} : length($child);
-      my $fits = ($child_len <= $available);
+      my $fits = ($child_len <= $available) || 0;
 
-      if (!$first && (!$fits || !$run_together)) {
-        # start a second+ line
-        $outstr .= "\n$indent";
-        $linelen = $indent_width;
+      if (!$first) {
+        if(!$fits && !ref($child)) {
+          if ($child =~ /( +)\z/ && ($child_len-length($1)) <= $available) {
+            # remove trailing space(s) e.g. in ' => '
+            substr($child,-length($1),INT_MAX,"");
+            $child_len -= length($1);
+            oops unless $child_len <= $available;
+            $fits = 2;
+            say "#     (level $level): Chopped ",_dbstr($1)," from child" if $debug;
+          }
+          if (!$fits && $linelen <= $indent_width && $run_together) {
+            # If we wrap we'll end up at the same or worse position after 
+            # indenting, so don't bother wrapping if running together
+            $fits = 3;
+            say "#     (level $level): Wrap would not help" if $debug
+          }
+        }
+        if (!$fits || !$run_together) {
+          # start a second+ line
+          $outstr =~ s/ +\z//;  
+          $outstr .= "\n$indent";
+          $linelen = $indent_width;
 
-        # elide any initial spaces after wrapping, e.g. in " => "
-        $child =~ s/^ +// unless ref($child);
-        say "#     (level $level): Pre-WRAP; ll=$linelen os=",_dbstr($outstr) if $debug;
+          # elide any initial spaces after wrapping, e.g. in " => "
+          $child =~ s/^ +// unless ref($child);
+
+          $available = $maxlinelen - $linelen;
+          $child_len = ref($child) ? $child->{tlen} : length($child);
+          $fits = ($child_len <= $available);
+          say "#     (level $level): 2nd+ Pre-WRAP; ",_dbstr($child)," cl=$child_len av=$available ll=$linelen f=$fits rt=",_tf($run_together)," os=",_dbstr($outstr) if $debug;
+        } else {
+          say "#     (level $level): (no 2nd+ pre-wrap); ",_dbstr($child)," cl=$child_len av=$available ll=$linelen f=$fits rt=",_tf($run_together) if $debug;
+        }
       }
 
       if (ref($child)) {
         ++$level;
-        $outstr .= $child->{opener};
-        $linelen = $indent_width + length($child->{opener});
-        if (! $fits) {
-          # Wrap before first child
+        $outstr .= $child->{O};
+        $linelen += length($child->{O});
+        if (! $fits && $child->{O} ne "") {
+          # Wrap before first child, if there is a real opener (not for '=>')
+          $outstr =~ s/ +\z//;  
           $outstr .= "\n$indent" . (' ' x $indent_unit);
+          $linelen = $indent_width + $indent_unit;
           say "#     (l $level): Wrap after opener: os=",_dbstr($outstr) if $debug;
         }
         __SUB__->($child); 
-        if (! $fits) {
-          # Wrap after close if we wrapped before opening
+        if (! $fits && $child->{O} ne "") {
+          # Wrap before closer if we wrapped after opener
+          $outstr =~ s/ +\z//;  
           $outstr .= "\n$indent";
           $linelen = $indent_width;
           say "#     (l $level): Wrap after closer; ll=$linelen os=",_dbstr($outstr) if $debug;
         }
-        $outstr .= $child->{closer};
-        $linelen += length($child->{closer});
+        $outstr .= $child->{C};
+        $linelen += length($child->{C});
         --$level;
       } else {
         $outstr .= $child;
         $linelen += length($child);
-        say "#     (level $level): appended SCALAR ",_dbstr($child) if $debug;
+        say "#     (level $level): appended SCALAR ",_dbstr($child)," os=",_dbstr($outstr) if $debug;
       }
       $available = $maxlinelen - $linelen;
       $first = 0;
@@ -1208,7 +1238,7 @@ say "# # APPENDED '$_' TO SCALAR: ",_dbstr($prev->{children}->[-1]);
 
     elsif (/\G\b[A-Za-z_][A-Za-z0-9_]*+\b/gc) { atom($&) } # bareword?
     elsif (/\G-?\d[\deE\.]*+\b/gc)            { atom($&) } # number
-    elsif (/\G\s*=>\s*/gc)                    { atom($&) }
+    elsif (/\G\s*=>\s*/gc)                    { equal_greater($&) }
     elsif (/\G\s*=(?=[\w\s'"])\s*/gc)         { atom($&) }
     elsif (/\G:*${pkgname_re}/gc)             { atom($&) }
     elsif (/\G[\[\{\(]/gc)                    { atom($&, "open") }
@@ -1219,7 +1249,7 @@ say "# # APPENDED '$_' TO SCALAR: ",_dbstr($prev->{children}->[-1]);
   }
   oops "Dangling prepend ",_dbstr($prepending) if $prepending;
 
-  say "top:\n",_dbvisnew($top)->Sortkeys(sub{[qw/tlen opener closer children/]})->Dump if $debug;
+  say "--------top-------\n",_dbvisnew($top)->Sortkeys(sub{[qw/O C tlen children/]})->Dump,"\n-----------------" if $debug;
 
   $outstr = "";
   $linelen = 0;
@@ -1600,9 +1630,9 @@ C<avis> formats an array (or any list) as comma-separated values in parenthesis.
 
 C<hvis> formats key => value pairs in parenthesis.
 
-=head2 alvis LIST
+=head2 avisl LIST
 
-=head2 hlvis EVENLIST
+=head2 hvisl EVENLIST
 
 The "B<l>" variants return a bare list without the enclosing parenthesis.
 
@@ -1618,9 +1648,9 @@ The "B<l>" variants return a bare list without the enclosing parenthesis.
 
 =head2 hvisq LIST
 
-=head2 alvisq LIST
+=head2 avislq LIST
 
-=head2 hlvisq EVENLIST
+=head2 hvislq EVENLIST
 
 The "B<q>" variants show strings 'single quoted' if possible.
 
@@ -1963,7 +1993,5 @@ Jim Avera  (jim.avera AT gmail)
 =for nobody BLK_* CLOSER S_CLOSER NS_CLOSER FLAGS_MASK NOOP OPENER are internal "constants".
 
 =for Pod::Coverage Foldwidth1 Terse Indent oops Debug
-
-=for Pod::Coverage BLK_CANTSPACE BLK_CLOSERNEXT BLK_MOVEDDOWN BLK_HASCHILD BLK_EXDENT BLK_MASK CLOSER S_CLOSER NS_CLOSER FLAGS_MASK NOOP OPENER
 
 =cut
