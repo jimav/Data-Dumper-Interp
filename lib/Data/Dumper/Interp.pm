@@ -943,13 +943,20 @@ sub __subst_spacedots() {  # edits $_
 
 my $indent_unit;
 
-sub __mycall(;@) {
+sub _mycallloc(;@) {
   my ($lno, $subcalled) = (caller(1))[2,3];
-  $subcalled.":".$lno.(@_ ? _dbavis(@_) : "")." "
+  ":".$lno.(@_ ? _dbavis(@_) : "")." "
 }
+
+use constant {
+  WRAP_ALWAYS  => 1,
+  WRAP_ALLHASH => 2,
+};
+use constant WRAP_STYLE => (WRAP_ALLHASH);
 
 sub _postprocess_DD_result {
   (my $self, local $_) = @_;
+  no warnings 'recursion';
   my ($debug, $vistype, $foldwidth, $foldwidth1)
     = @$self{qw/Debug _Vistype Foldwidth Foldwidth1/};
   my $useqq = $self->Useqq();
@@ -981,7 +988,7 @@ sub _postprocess_DD_result {
 
     if ($prepending) { $_ = $prepending . $_; $prepending = ""; }
 
-    say "###",__mycall(), _dbrawstr($_),"($mode)" 
+    say "###atom",_mycallloc(), _dbrawstr($_),"($mode)" 
       ,"\n context:",_dbvisnew($context)->Sortkeys(sub{[grep{exists $_[0]->{$_}} qw/O C tlen children CLOSE_AFTER_NEXT/]})->Dump()
       if $debug;
     if ($mode eq "prepend_to_next") {
@@ -1063,11 +1070,23 @@ sub _postprocess_DD_result {
   # At any nesting level, if everything (including any nested levels) fits
   # on a single line, then that part is output without folding;
   #
-  # When folding is necessary, IF any enclosed siblings themselves will
-  # not fit on a single line, then ALL siblings are wrapped to the start
-  # of their own lines, so the siblings line up vertically; however
-  # if all the siblings individually can fit without folding, then the sibs
-  # are packed multiple per line, wrapping only when needed between siblings:
+  # 4/25/2023: Added the (non-public) config constant WRAP_STYLE;
+  #
+  # WRAP_STYLE == WRAP_ALWAYS:
+  #
+  # If folding is necessary, then *every* member of the folded block
+  # appears on a separate line, so members all vertically align.
+  #
+  # (WRAP_STYLE & WRAP_ALLHASH): Members of a hash (key => value) 
+  # are shown on separate lines, but not members of an array.
+  #
+  # Otherwise:
+  #
+  # When folding is necessary, every member appears on a separate
+  # line if ANY of them will not fit on a single line; however if
+  # they all fit individually, then shorter members will be run
+  # together on the same line.  #
+  # For example:
   #
   #    [aaa,bbb,[ccc,ddd,[eee,fff,hhhhhhhhhhhhhhhhhhhhh,{key => value}]]]
   #
@@ -1114,38 +1133,43 @@ sub _postprocess_DD_result {
   my sub expand_children($) {
     my $parent = shift; 
     # $level is already set appropriately for $parent->{children},
-    # and the first child should be immediately appended to $outstr
-    # (which has been indented or in run-together position as appropriate).
+    # and the parent's {opener} is at the end of $outstr.
     #
     # Intially we are called with a fake parent ($top) containing
-    # the top-most item as its child, with $level==0; this puts the top
-    # item at the left margin.
+    # no {opener} and the top-most item as its only child, with $level==0; 
+    # this puts the top item at the left margin.
     #
     # If all children individually fit then run them all together, 
     # wrapping only between siblings; otherwise start each sibling on 
     # it's own line so they line up vertically.
+    # [4/25/2023: Now controlled by WRAP_STYLE]
 
     my $available = $maxlinelen - $linelen;
     my $indent_width = $level * $indent_unit;
 
-    my $run_together = all{ (ref() ? $_->{tlen} : length) <= $available }
-                          @{$parent->{children}};
+    my $run_together = 
+      (WRAP_STYLE & WRAP_ALWAYS)==0
+      &&
+      all{ (ref() ? $_->{tlen} : length) <= $available } @{$parent->{children}}
+      ;
 
     if (!$run_together
         && @{$parent->{children}}==3 
         && !ref(my $item=$parent->{children}->[1])) {
       # Concatenate (key,=>) if possible 
-      $run_together = 1 if $item =~ /\A *=> *\z/;
-      say "#     (level $level): Running together $parent->{children}->[0] => value" if $debug;
+      if ($item =~ /\A *=> *\z/) {
+        $run_together = 1;
+        say "#     (level $level): Running together $parent->{children}->[0] => value" if $debug;
+      }
     }
       
     my $indent = ' ' x $indent_width;
 
-    say "###",__mycall(), "level $level, avail=$available",
+    say "###expand",_mycallloc(), "level $level, avail=$available",
         " rt=",_tf($run_together),
         " indw=$indent_width ll=$linelen maxll=$maxlinelen : ",
         #"{ tlen=",$parent->{tlen}," }",
-        _dbvisnew($parent)->Sortkeys(sub{[grep{exists $_[0]->{$_}} qw/O C tlen CLOSE_AFTER_NEXT/]})->Dump(),
+        " p=",_dbvisnew($parent)->Sortkeys(sub{[grep{exists $_[0]->{$_}} qw/O C tlen CLOSE_AFTER_NEXT/]})->Dump(),
         "\n  os=",_dbstr($outstr) if $debug;
 
     #oops(_dbavis($linelen,$indent_width)) unless $linelen >= $indent_width;
@@ -1155,7 +1179,8 @@ sub _postprocess_DD_result {
       my $child_len = ref($child) ? $child->{tlen} : length($child);
       my $fits = ($child_len <= $available) || 0;
 
-      if (!$first) {
+      if ($first) {
+      } else {
         if(!$fits && !ref($child)) {
           if ($child =~ /( +)\z/ && ($child_len-length($1)) <= $available) {
             # remove trailing space(s) e.g. in ' => '
