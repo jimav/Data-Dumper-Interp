@@ -74,15 +74,38 @@ use File::Basename qw/dirname/;
 sub bug(@) { @_=("BUG FOUND:",@_); goto &Carp::confess }
 
 # Parse manual-testing args from @ARGV 
-our ($debug, $verbose, $silent);
+my @orig_ARGV = @ARGV;
+our ($debug, $verbose, $silent, $nonrandom);
 use Getopt::Long qw(GetOptions);
 Getopt::Long::Configure("pass_through");
 GetOptions(
   "d|debug"           => sub{ $debug=$verbose=1; $silent=0 },
   "s|silent"          => \$silent,
+  "n|nonrandom"       => \$nonrandom,
   "v|verbose"         => \$verbose,
 ) or die "bad args";
 Getopt::Long::Configure("default");
+
+if ($nonrandom) {
+  # This must run before Test::More is loaded!!
+  # Normally this is the case because our package body is executed before
+  # import() is called.
+  if (open my $fh, "<", "/proc/sys/kernel/randomize_va_space") {
+    chomp(my $setting = <$fh>);
+    unless($setting eq "0") {
+      warn "WARNING: Kernel address space randomization is in effect.\n";
+      warn "To disable:  echo 0 | sudo tee /proc/sys/kernel/randomize_va_space\n";
+      warn "To re-enable echo 2 | sudo tee /proc/sys/kernel/randomize_va_space\n";
+    }
+  }
+  unless (($ENV{PERL_PERTURB_KEYS}//"") eq "2") {
+    $ENV{PERL_PERTURB_KEYS} = "2"; # deterministic
+    $ENV{PERL_HASH_SEED} = "0xDEADBEEF";
+    #$ENV{PERL_HASH_SEED_DEBUG} = "1";
+    $ENV{PERL5LIB} = join(":", @INC);
+    exec $^X, $0, @orig_ARGV; # for reproducible results
+  }
+}
 
 sub import {
   my $target = caller;
@@ -95,7 +118,7 @@ sub import {
 
   if (grep{ $_ eq ':silent' } @_) {
     @_ = grep{ $_ ne ':silent' } @_;
-    _start_silent();
+    _start_silent() unless $debug;
   }
 
   # chain to Exporter to export any other importable items
@@ -465,6 +488,10 @@ sub check($$@) {
   my ($desc, $expected_arg, @actual) = @_;
   local $_;  # preserve $1 etc. for caller
   my @expected = ref($expected_arg) eq "ARRAY" ? @$expected_arg : ($expected_arg);
+  if ($@) {
+    local $_;
+    confess "Eval error: $@\n" unless $@ =~ /fake/i;  # It's okay if $@ is "...Fake..."
+  }
   confess "zero 'actual' results" if @actual==0;
   confess "ARE WE USING THIS FEATURE? (@actual)" if @actual != 1;
   confess "ARE WE USING THIS FEATURE? (@expected)" if @expected != 1;
@@ -512,7 +539,6 @@ sub verif_eval_err(;$) {  # MUST be called on same line as the 'eval'
     unless $ex;
 
   if ($ex !~ / at $fn line $ln\.?(?:$|\n)/s) {
-    die "tex";
     confess "Got UN-expected err (not ' at $fn line $ln'):\n«$ex»\n",
             fmtsheet(sheet({package => $caller[0]})),
             "\n";
