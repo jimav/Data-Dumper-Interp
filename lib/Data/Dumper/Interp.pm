@@ -664,7 +664,7 @@ sub Dump {
   $our_result;
 }
 
-sub _preprocess { # modifies an item by ref
+sub _preprocess { # Modify the cloned data
   no warnings 'recursion';
   my ($self, $cloned_itemref, $orig_itemref) = @_;
   my ($debug, $seenhash) = @$self{qw/Debug Seenhash/};
@@ -680,90 +680,104 @@ btw '##         orig=",addrvis($orig_itemref)," -> ",_dbvis($$orig_itemref)' if 
 
   # About TIED VARIABLES:
   # We must never modify a tied variable because of user-defined side-effects.
-  # So if we do want to replace a tied variable we untie it first.
+  # So when we want to replace a tied variable we untie it first, if possible.
   # N.B. The whole structure was cloned, so this does not untie the 
   # user's variables.
+  #
+  # All modifications (untie and over-writing) is done in eval{...} in case
+  # the data is read-only or an UNTIE handler throws -- in which case we leave
+  # the cloned item as it is.  This occurs e.g. with the 'Readonly' module;
+  # I tried using Readonly::Clone (insterad of Clone::clone) to copy the input,
+  # since it is supposed to make a mutable copy; but it has bugs with refs to
+  # other refs, and doesn't actually make everything mutable; it was a big mess
+  # so now taking the simple way out.
 
     # Side note: Taking a ref to a member of a tied container, 
-    # e.g. \$tiedhash{key}, actually returns a tied scalar or some other 
-    # magical thing which, every time it is read, re-fetches the "referenced" 
-    # datum from the container into a temporary and returns a ref to the temp.
-    # The same temporary is used each time, so the returned ref is the same 
-    # and the illusion of being a normal hash is maintained.
-    # However Data::Dumper can abort with "cannot handle ref type 10"
-    # when it sees such things.  Also, if the magical ref is itself
-    # stored elsewhere in the container and then the container is *untied*,
-    # bat things happend (refcount problems?)
-
-  # Our Item is only ever a scalar, either the top-level item from the user
-  # or a member of a container we unroll below.  In either case the scalar
-  # could be either a ref to something, or a non-ref value.
-
-  if (tied($$cloned_itemref)) {
-    btw '     Item itself is tied' if $debug;
-    my $copy = $$cloned_itemref;
-    untie $$cloned_itemref;
-    $$cloned_itemref = $copy; # n.b. $copy might be a ref to a tied variable
-    oops if tied($$cloned_itemref);
-  }
-
-  if (defined(my $repl = $self->_replacement($$orig_itemref))) {
-    btw '##pp Item REPLACED by ",_dbvis($repl)' if $debug;
-    # If the item is $#array then the following assignment will try to
-    # change the length of 'array', but blow up because the value is a string.
-    # I suspect similar things could happen with true read-only values
-    # but it appears that Clone::clone makes them writeable.
-    # Anyway, use eval and just leave it as-is if the assignment fails.
+    # e.g. \$tiedhash{key}, actually returns an overloaded object or some other
+    # magical thing which, every time it is de-referenced, FETCHes the datum
+    # into a temporary.
     #
-    eval { $$cloned_itemref = $repl };
-    if ($@) {
-      btw '##pp Item *can not* be REPLACED by ",_dbvis($repl)," ($@)' if $debug;
-      return;
-    }
-    return
-  }
+    # There is a bug somewhere which makes it unsafe to store these fake
+    # references inside tied variables because after the variable is 'untie'd
+    # bad things can happen (refcount problems?).   So after a lot of mucking
+    # around I gave up trying to do anything intelligent about tied data.
+    # I still have to untie variables before over-writing them with substitute
+    # content.
 
-  my $rt = reftype($$cloned_itemref) // ""; # "" if item is not a ref
-  if (reftype($cloned_itemref) eq "SCALAR") {
-    oops if $rt;
-    btw '##pp item is non-ref scalar; stop.' if $debug;
-    return
-  }
+  # Note: Our Item is only ever a scalar, either the top-level item from the 
+  # user or a member of a container we unroll below.  In either case the
+  # scalar could be either a ref to something or a non-ref value.
 
-  # Item is some kind of ref
-  oops unless reftype($cloned_itemref) eq "REF";
-  oops unless reftype($orig_itemref) eq "REF";
-
-  if ($rt eq "SCALAR" || $rt eq "LVALUE" || $rt eq "REF") {
-    btw '##pp dereferencing ref-to-scalarish $rt' if $debug;
-    $self->_preprocess($$cloned_itemref, $$orig_itemref);
-  }
-  elsif ($rt eq "ARRAY") {
-    btw '##pp ARRAY ref' if $debug;
-    if (tied @$$cloned_itemref) {
-      btw '     aref to *tied* ARRAY' if $debug;
-      my $copy = [ @$$cloned_itemref ]; # only 1 level
-      untie @$$cloned_itemref;
-      @$$cloned_itemref = @$copy;
+  eval {
+    if (tied($$cloned_itemref)) {
+      btw '     Item itself is tied' if $debug;
+      my $copy = $$cloned_itemref;
+      untie $$cloned_itemref;
+      $$cloned_itemref = $copy; # n.b. $copy might be a ref to a tied variable
+      oops if tied($$cloned_itemref);
     }
-    for my $ix (0..$#{$$cloned_itemref}) {
-      $self->_preprocess(\$$cloned_itemref->[$ix], \$$orig_itemref->[$ix]);
+  
+    if (defined(my $repl = $self->_replacement($$orig_itemref))) {
+      btw '##pp Item REPLACED by ",_dbvis($repl)' if $debug;
+      # If the item is $#array then the following assignment will try to
+      # change the length of 'array', but blow up because the value is a string.
+      # I suspect similar things could happen with true read-only values
+      # but it appears that Clone::clone makes them writeable.
+      # Anyway, use eval and just leave it as-is if the assignment fails.
+      #
+      eval { $$cloned_itemref = $repl };
+      if ($@) {
+        btw '##pp Item *can not* be REPLACED by ",_dbvis($repl)," ($@)' if $debug;
+        return;
+      }
+      return
     }
-  }
-  elsif ($rt eq "HASH") {
-btw '##pp HASH ref' if $debug;
-    if (tied %$$cloned_itemref) {
-      btw '     href to *tied* HASH' if $debug;
-      my $copy = { %$$cloned_itemref }; # only 1 level
-      untie %$$cloned_itemref;
-      %$$cloned_itemref = %$copy;
-      die if tied %$$cloned_itemref;
+  
+    my $rt = reftype($$cloned_itemref) // ""; # "" if item is not a ref
+    if (reftype($cloned_itemref) eq "SCALAR") {
+      oops if $rt;
+      btw '##pp item is non-ref scalar; stop.' if $debug;
+      return
     }
-    #For easier debugging, do in sorted order
-    btw '   #### iterating hash values...' if $debug;
-    for my $key (sort keys %$$cloned_itemref) {
-      $self->_preprocess(\$$cloned_itemref->{$key}, \$$orig_itemref->{$key});
+  
+    # Item is some kind of ref
+    oops unless reftype($cloned_itemref) eq "REF";
+    oops unless reftype($orig_itemref) eq "REF";
+  
+    if ($rt eq "SCALAR" || $rt eq "LVALUE" || $rt eq "REF") {
+      btw '##pp dereferencing ref-to-scalarish $rt' if $debug;
+      $self->_preprocess($$cloned_itemref, $$orig_itemref);
     }
+    elsif ($rt eq "ARRAY") {
+      btw '##pp ARRAY ref' if $debug;
+      if (tied @$$cloned_itemref) {
+        btw '     aref to *tied* ARRAY' if $debug;
+        my $copy = [ @$$cloned_itemref ]; # only 1 level
+        untie @$$cloned_itemref;
+        @$$cloned_itemref = @$copy;
+      }
+      for my $ix (0..$#{$$cloned_itemref}) {
+        $self->_preprocess(\$$cloned_itemref->[$ix], \$$orig_itemref->[$ix]);
+      }
+    }
+    elsif ($rt eq "HASH") {
+  btw '##pp HASH ref' if $debug;
+      if (tied %$$cloned_itemref) {
+        btw '     href to *tied* HASH' if $debug;
+        my $copy = { %$$cloned_itemref }; # only 1 level
+        untie %$$cloned_itemref;
+        %$$cloned_itemref = %$copy;
+        die if tied %$$cloned_itemref;
+      }
+      #For easier debugging, do in sorted order
+      btw '   #### iterating hash values...' if $debug;
+      for my $key (sort keys %$$cloned_itemref) {
+        $self->_preprocess(\$$cloned_itemref->{$key}, \$$orig_itemref->{$key});
+      }
+    }
+  };#eval
+  if ($@) {
+    btw "*EXCEPTION*, just returning\n$@\n" if $debug;
   }
 }
 
