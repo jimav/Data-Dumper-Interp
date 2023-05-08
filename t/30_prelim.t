@@ -2,12 +2,10 @@
 use FindBin qw($Bin);
 use lib $Bin;
 use t_Common qw/oops/; # strict, warnings, Carp, etc.
-use t_TestCommon ':silent', qw/bug $debug/; # Test::More etc.
+use t_TestCommon ':silent', qw/bug $debug t_ok t_is t_like/; # Test::More etc.
 
 use Data::Dumper::Interp;
 $Data::Dumper::Interp::Debug = $debug if $debug;
-
-use Readonly ();
 
 # Convert a literal "expected" string which contains qr/.../ismx sequences
 # into a regex which matches the same string but allows various representations
@@ -29,32 +27,32 @@ sub expstr2re($) {
 
 $Data::Dumper::Interp::Foldwidth = 12;
 
-is( vis undef, 'undef' );
-is( vis \undef, '\\undef' );
-is( vis \\undef, '\\\\undef' );
+t_is( vis undef, 'undef' );
+t_is( vis \undef, '\\undef' );
+t_is( vis \\undef, '\\\\undef' );
 
-is( vis 123, '123' );
-is( vis \123, '\\123' );
-is( vis \\123, '\\\\123' );
+t_is( vis 123, '123' );
+t_is( vis \123, '\\123' );
+t_is( vis \\123, '\\\\123' );
 
-is( vis { aaa => 12 }, '{aaa => 12}' );
-is( vis { aaa => 123 }, '{aaa => 123}' );
-is( vis { aaa => 1234 }, do{chomp(my $str=<<'EOF'); $str} );
+t_is( vis { aaa => 12 }, '{aaa => 12}' );
+t_is( vis { aaa => 123 }, '{aaa => 123}' );
+t_is( vis { aaa => 1234 }, do{chomp(my $str=<<'EOF'); $str} );
 {
   aaa =>
     1234
 }
 EOF
 
-is( vis { aaa => \1 }, '{aaa => \\1}' );
-is( vis { aaa => \12 }, '{aaa => \\12}' );
-is( vis { aaa => \\12 }, do{chomp(my $str=<<'EOF'); $str} );
+t_is( vis { aaa => \1 }, '{aaa => \\1}' );
+t_is( vis { aaa => \12 }, '{aaa => \\12}' );
+t_is( vis { aaa => \\12 }, do{chomp(my $str=<<'EOF'); $str} );
 {
   aaa =>
     \\12
 }
 EOF
-is( vis { aaa => \\\12 }, do{chomp(my $str=<<'EOF'); $str} );
+t_is( vis { aaa => \\\12 }, do{chomp(my $str=<<'EOF'); $str} );
 {
   aaa =>
     \\\12
@@ -109,7 +107,7 @@ for my $fw (1..5) {
 EOF
 }
 
-like( Data::Dumper::Interp->new()->Foldwidth(72) 
+t_like( Data::Dumper::Interp->new()->Foldwidth(72) 
      ->vis({ "" => "Emp", A=>111,BBBBB=>222,C=>{d=>888,e=>999},D=>{},EEEEEEEEEEEEEEEEEEEEEEEEEE=>\42,F=>\\\43, G=>qr/foo.*bar/xsi}),
     expstr2re(do{chomp($_=<<'EOF'); $_}) );
 {
@@ -120,16 +118,16 @@ EOF
 
 # $Foldwidth is 12
 
-is( vis [12345678,4], '[12345678,4]' );
+t_is( vis [12345678,4], '[12345678,4]' );
 
-is( vis [123456789,4], do{chomp(local $_=<<'EOF'); $_} );
+t_is( vis [123456789,4], do{chomp(local $_=<<'EOF'); $_} );
 [
   123456789,
   4
 ]
 EOF
 
-is( vis {bxxxxxxxxxxxxxxxxxxxxxxxxxbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb=>42},
+t_is( vis {bxxxxxxxxxxxxxxxxxxxxxxxxxbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb=>42},
     do{chomp(local $_=<<'EOF'); $_} );
 {
   bxxxxxxxxxxxxxxxxxxxxxxxxxbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
@@ -137,7 +135,7 @@ is( vis {bxxxxxxxxxxxxxxxxxxxxxxxxxbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb=>42},
 }
 EOF
 
-is( vis [[[[[[[[[[[[[42]]]]]]]]]]]]],
+t_is( vis [[[[[[[[[[[[[42]]]]]]]]]]]]],
     do{chomp(local $_=<<'EOF'); $_} );
 [
   [
@@ -179,6 +177,7 @@ EOF
   $orig_a[4] = $orig_a[1]; # i.e. \%hash
   local $Data::Dumper::Interp::addrvis_ndigits = 5
     unless $Data::Dumper::Interp::addrvis_ndigits > 5;
+  #use Readonly ();
   #Readonly::Array my @a => (@$x); my $aref = \@a;
   my $aref = \@orig_a;
   if ($debug) {
@@ -204,7 +203,7 @@ EOF
 }
 
 # Once hit an assertion
-is( vis [ \undef, \\undef ],
+t_is( vis [ \undef, \\undef ],
     do{chomp(local $_=<<'EOF'); $_}, "recursive structure" );
 [
   \undef,
@@ -213,19 +212,24 @@ is( vis [ \undef, \\undef ],
 EOF
 
 # Once hit an assertion
-is( dvis('\%{}'), '\%{}' );
+t_is( dvis('\%{}'), '\%{}' );
 
 # Once hit an assertion
 { my $obj = bless do{ \(my $x = []) },"Foo::Bar";
-  like( Data::Dumper::Interp->new()->Foldwidth(0)->vis($obj),
-        qr/^\Q$obj\E$/ );
+  t_like( Data::Dumper::Interp->new()->Foldwidth(0)->vis($obj),
+          qr/^\Q$obj\E$/ );
 }
+
+# Once caused "UNPARSED !!0" (with perl 5.37.10 & D::D 2.188)
+t_like( vis(!!undef), qr/^(?:!!0|"")$/, "vis(!!undef)" );
+t_like( vis(!!0),     qr/^(?:!!0|"")$/, "vis(!!0)" );
+t_like( vis(!!1),     qr/^(?:!!1|1)$/, "vis(!!1)" );
 
 # Once caused << "<NQMagic...>0" isn't numeric in scalar assignment >>
 # when the apparent reference to a zero was to be replaced by a reference
 # to "<NQMagic...>0" in the cloned data.
 { my @ary = (42);
-  ok( eval{ vis(\$#ary) }, 'vis(\$#array) did not hit a bug' )
+  t_ok( eval{ vis(\$#ary) }, 'vis(\$#array) did not hit a bug' )
     || diag "Eval error: $@";
 }
 
@@ -252,7 +256,7 @@ is( dvis('\%{}'), '\%{}' );
 
 #say vis bless( do{ \(my $x = []) } );
 
-is( Data::Dumper::Interp->new()->Foldwidth(4)->vis( [ [ ], 12345 ] ),
+t_is( Data::Dumper::Interp->new()->Foldwidth(4)->vis( [ [ ], 12345 ] ),
     do{chomp(local $_=<<'EOF'); $_} );
 [
   [],

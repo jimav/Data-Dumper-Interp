@@ -141,6 +141,7 @@ our $_dbmaxlen = 300;
 sub _dbrawstr(_) { "«".(length($_[0])>$_dbmaxlen ? substr($_[0],0,$_dbmaxlen-3)."..." : $_[0])."»" }
 sub _dbstr($) {
   local $_ = shift;
+  return "undef" if !defined;
   s/\n/\N{U+2424}/sg; # a special NL glyph
   s/ /\N{U+00B7}/sg;  # space -> Middle Dot
   s/[\x{00}-\x{1F}]/ chr( ord($&)+0x2400 ) /aseg;
@@ -1281,7 +1282,7 @@ sub _postprocess_DD_result {
   
 
   while ((pos()//0) < length) {
-       if (/\G[\\\*]/gc)                         { atom($&, "prepend_to_next") }
+       if (/\G[\\\*\!]/gc)                       { atom($&, "prepend_to_next") }
     elsif (/\G[,;]/gc)                           { atom($&, "append_to_prev") }
     elsif (/\G"(?:[^"\\]++|\\.)*+"/gsc)          { atom($&) } # "quoted"
     elsif (/\G'(?:[^'\\]++|\\.)*+'/gsc)          { atom($&) } # 'quoted'
@@ -1301,7 +1302,12 @@ sub _postprocess_DD_result {
     elsif (/\G[\[\{\(]/gc)                    { atom($&, "open") }
     elsif (/\G[\]\}\)]/gc)                    { atom($&, "close") }
     elsif (/\G\s+/sgc)                        {          }
-    else { oops "UNPARSED ",_dbstr(substr($_,pos//0,30)."..."),"  ",_dbstrposn($_,pos()//0);
+    else { 
+      my $remnant = substr($_,pos//0);
+      Carp::cluck "UNPARSED ",_dbstr(substr($remnant,0,30)."..."),"  ",_dbstrposn($_,pos()//0),"\nFULL STRING:",_dbstr($_),"\n(Using remainder as-is)\n" ;
+      atom($remnant); 
+      while (defined $context->{parent}) { atom("", "close"); }
+      last;
     }
   }
   oops "Dangling prepend ",_dbstr($prepending) if $prepending;

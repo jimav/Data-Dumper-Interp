@@ -50,7 +50,9 @@ use Test::More 0.98; # see UNIVERSAL
 require Exporter;
 use parent 'Exporter';
 our @EXPORT = qw/silent
-                 bug ok_with_lineno like_with_lineno
+                 bug 
+                 t_ok t_is t_like
+                 ok_with_lineno is_with_lineno like_with_lineno
                  rawstr showstr showcontrols displaystr 
                  show_white show_empty_string
                  fmt_codestring 
@@ -216,6 +218,7 @@ sub _start_silent() {
 
   $orig_DIE_trap = $SIG{__DIE__};
   $SIG{__DIE__} = sub{ 
+    return if $^S or !defined($^S);  # executing an eval, or Perl compiler
     my @diemsg = @_; 
     my $err=_finish_silent(); warn $err if $err;
     die @diemsg;
@@ -368,20 +371,32 @@ sub fmt_codestring($;$) { # returns list of lines
   my $i; map{ sprintf "%s%2d: %s\n", $prefix,++$i,$_ } (split /\n/,$_[0]);
 }
 
-sub ok_with_lineno($;$) {
+sub t_ok($;$) {
   my ($isok, $test_label) = @_;
   my $lno = (caller)[2];
   $test_label = ($test_label//"") . " (line $lno)";
   @_ = ( $isok, $test_label );
   goto &Test::More::ok;  # show caller's line number
 }
-sub like_with_lineno($$;$) {
+sub ok_with_lineno($;$) { goto &t_ok };
+
+sub t_is($$;$) {
   my ($got, $exp, $test_label) = @_;
   my $lno = (caller)[2];
-  $test_label = ($test_label//"") . " (line $lno)";
+  $test_label = ($test_label//$exp//"undef") . " (line $lno)";
+  @_ = ( $got, $exp, $test_label );
+  goto &Test::More::is;  # show caller's line number
+}
+sub is_with_lineno($$;$) { goto &t_is }
+
+sub t_like($$;$) {
+  my ($got, $exp, $test_label) = @_;
+  my $lno = (caller)[2];
+  $test_label = ($test_label//$exp) . " (line $lno)";
   @_ = ( $got, $exp, $test_label );
   goto &Test::More::like;  # show caller's line number
 }
+sub like_with_lineno($$;$) { goto &t_like }
 
 sub _check_end($$$) {
   my ($errmsg, $test_label, $ok_only_if_failed) = @_;
