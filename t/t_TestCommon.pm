@@ -35,8 +35,9 @@ use v5.16; # must have PerlIO for in-memory files for ':silent';
 use Carp;
 BEGIN{
   # Unicode support
-  # This must be done before loading Test::More to be effective
+  # This must be done before loading Test::More or Test2 to be effective
   confess "Test::More already loaded!" if defined( &Test::More::ok );
+  confess "Test2::V0 already loaded!" if defined( &Test2::V0::import );
 
   # Maybe we should just call binmode(encoding...) on STDOUT & STDERR?
   use open IO => ':encoding(UTF-8)', ':std';
@@ -45,7 +46,8 @@ BEGIN{
   STDERR->autoflush(1);
   STDOUT->autoflush(1);
 }
-use Test::More 0.98; # see UNIVERSAL
+use Test2::V0 (); # a huge collection of tools
+use POSIX ();
 
 require Exporter;
 use parent 'Exporter';
@@ -59,7 +61,7 @@ our @EXPORT = qw/silent
                  verif_no_internals_mentioned 
                  insert_loc_in_evalstr verif_eval_err 
                  timed_run
-                 checkeq_literal expect1 check _check_end
+                 mycheckeq_literal expect1 mycheck _mycheck_end
                  arrays_eq hash_subset
                  run_perlscript
                  @quotes
@@ -89,7 +91,7 @@ GetOptions(
 Getopt::Long::Configure("default");
 
 if ($nonrandom) {
-  # This must run before Test::More is loaded!!
+  # This must run before Test::More or Test2::V0 is loaded!!
   # Normally this is the case because our package body is executed before
   # import() is called.
   if (open my $fh, "<", "/proc/sys/kernel/randomize_va_space") {
@@ -116,7 +118,14 @@ sub import {
   # (prevents corrupting $!/ERRNO in subsequent tests)
   eval '$[' // die;
 
-  Test::More->import::into($target);
+  #  Do not inport 1- and 2- or 3- character upper-case names, which are 
+  #  likely to clash with user variables and/or spreadsheet column letters
+  #  (when using Spreadsheet::Edit).  Test2::Tools::Compare documents some 
+  #  of these ("QUICK CHECKS") as not be exported by default, but they are 
+  #  by default re-exported by Test2::V0 anyway.
+  Test2::V0->import::into($target,
+    (map{ "!$_" } "A".."AAZ")
+  );
 
   if (grep{ $_ eq ':silent' } @_) {
     @_ = grep{ $_ ne ':silent' } @_;
@@ -127,8 +136,9 @@ sub import {
   goto &Exporter::import
 }
 
-sub dprint(@)   { Test::More::note(@_)               if $debug };
-sub dprintf($@) { Test::More::note($_[0],@_[1..$#_]) if $debug };
+# Avoid turning on Test2 if not otherwise used...
+sub dprint(@)   { print(@_)                if $debug };
+sub dprintf($@) { printf($_[0],@_[1..$#_]) if $debug };
 
 sub arrays_eq($$) {
   my ($a,$b) = @_;
@@ -164,15 +174,10 @@ sub string_to_tempfile($@) {
 # and also where -I options might supply library paths.
 # This is usually enclosed in Capture { ... }
 sub run_perlscript(@) {
-  my @cmd = @_;
-  oops unless defined($cmd[0]);
-  VERIF:
-  { open my $fh, "<", $cmd[0] or die "$cmd[0] : $!";
-    while (<$fh>) { last VERIF if /^#!.*perl|^\s*use\s+(?:warnings|\w+::)/; }
-    confess "$cmd[0] does not appear to be a Perl script";
-  }
+  my @perlargs = @_;  # might be ('-e', 'perlcode...')
+  unshift @perlargs, "-MCarp=verbose" if $Carp::Verbose;
   local $ENV{PERL5LIB} = join(":", @INC);
-  system $^X, @cmd;
+  system $^X, @perlargs;
 }
 
 #--------------- :silent support ---------------------------
@@ -180,6 +185,7 @@ sub run_perlscript(@) {
 # is not written to the test process's STDOUT or STDERR, so we do not need
 # to worry about ignoring those normal outputs (somehow everything is
 # merged at the right spots, presumably by a supervisory process).
+# [Note May23: This was with Test::More may *NOT* be true with Test2::V0 !!]
 #
 # Therefore tests can be simply wrapped in silent{...} or the entire
 # program via the ':silent' tag; however any "Silence expected..." diagnostics
@@ -249,7 +255,7 @@ sub silent(&) {
   };
   my $errmsg = _finish_silent();
   local $Test::Builder::Level = $Test::Builder::Level + 1;
-  Test::More::ok(! defined($errmsg), $errmsg);
+  Test2::V0::ok(! defined($errmsg), $errmsg);
   wantarray ? @result : $result[0]
 }
 END{
@@ -283,6 +289,9 @@ sub verif_no_internals_mentioned($) { # croaks if references found
   
   # Ignore object refs like Some::Package=THING(hexaddr)
   s/(?<!\w)\w[\w:\$]*=(?:REF|ARRAY|HASH|SCALAR|CODE|GLOB)\(0x[0-9a-f]+\)//g;
+  
+  # Ignore Data::Dumper::addrvis output like Some::Package<dec:hex>
+  s/(?<!\w)\w[\w:\$]*<\d+:[\da-f]+>//g;
   
   # Mask references to our test library files named t_something.pm
   s#\b(\bt_\w+).pm(\W|$)#<$1 .pm>$2#gs;
@@ -376,7 +385,7 @@ sub t_ok($;$) {
   my $lno = (caller)[2];
   $test_label = ($test_label//"") . " (line $lno)";
   @_ = ( $isok, $test_label );
-  goto &Test::More::ok;  # show caller's line number
+  goto &Test2::V0::ok;  # show caller's line number
 }
 sub ok_with_lineno($;$) { goto &t_ok };
 
@@ -385,7 +394,7 @@ sub t_is($$;$) {
   my $lno = (caller)[2];
   $test_label = ($test_label//$exp//"undef") . " (line $lno)";
   @_ = ( $got, $exp, $test_label );
-  goto &Test::More::is;  # show caller's line number
+  goto &Test2::V0::is;  # show caller's line number
 }
 sub is_with_lineno($$;$) { goto &t_is }
 
@@ -394,24 +403,24 @@ sub t_like($$;$) {
   my $lno = (caller)[2];
   $test_label = ($test_label//$exp) . " (line $lno)";
   @_ = ( $got, $exp, $test_label );
-  goto &Test::More::like;  # show caller's line number
+  goto &Test2::V0::like;  # show caller's line number
 }
 sub like_with_lineno($$;$) { goto &t_like }
 
-sub _check_end($$$) {
+sub _mycheck_end($$$) {
   my ($errmsg, $test_label, $ok_only_if_failed) = @_;
   return
     if $ok_only_if_failed && !$errmsg;
   my $lno = (caller)[2];
-  &Test::More::diag("**********\n${errmsg}***********\n") if $errmsg;
+  &Test2::V0::diag("**********\n${errmsg}***********\n") if $errmsg;
   @_ = ( !$errmsg, $test_label );
   goto &ok_with_lineno;
 }
 
-# Nicer alternative to check() when 'expected' is a literal string, not regex
-sub checkeq_literal($$$) {
+# Nicer alternative to mycheck() when 'expected' is a literal string, not regex
+sub mycheckeq_literal($$$) {
   my ($desc, $exp, $act) = @_;
-  #confess "'exp' is not plain string in checkeq_literal" if ref($exp); #not re!
+  #confess "'exp' is not plain string in mycheckeq_literal" if ref($exp); #not re!
   $exp = show_white($exp); # stringifies undef
   $act = show_white($act);
   return unless $exp ne $act;
@@ -440,7 +449,7 @@ sub checkeq_literal($$$) {
 }
 sub expect1($$) {
   @_ = ("", @_);
-  goto &checkeq_literal;
+  goto &mycheckeq_literal;
 }
 
 # Convert a literal "expected" string which contains things which are
@@ -499,7 +508,7 @@ sub expstr2re($) {
 }
 
 # check $test_desc, string_or_regex, result
-sub check($$@) {
+sub mycheck($$@) {
   my ($desc, $expected_arg, @actual) = @_;
   local $_;  # preserve $1 etc. for caller
   my @expected = ref($expected_arg) eq "ARRAY" ? @$expected_arg : ($expected_arg);
@@ -537,7 +546,7 @@ sub check($$@) {
     } else {
       unless ($expected eq $actual) {
         @_ = ("TESTc FAILED: $desc", $expected, $actual);
-        goto &checkeq_literal
+        goto &mycheckeq_literal
       }
     }
   }
@@ -583,7 +592,7 @@ sub timed_run(&$@) {
     \&Time::HiRes::clock;
   }} // sub{ my @t = times; $t[0]+$t[1] };
   dprint("Note: $@") if $@;
-  $@ = ""; # avoid triggering "Eval error" in check();
+  $@ = ""; # avoid triggering "Eval error" in mycheck();
 
   my $startclock = &$getcpu();
   my (@result, $result);

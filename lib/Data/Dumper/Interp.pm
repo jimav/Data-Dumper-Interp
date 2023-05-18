@@ -65,7 +65,8 @@ sub addrvis(_) {
   # Display an address as decimal:hex showing only the last few digits.
   # The number of digits shown increases when collisions occur.
   # The arg can be a numeric address or a ref from which the addr is taken.
-  # If the arg is a ref, the result is REFTYPE<dec:hex> otherwise just dec:hex
+  # If the arg is a ref, the result is REFTYPEorOBJTYPE<dec:hex> 
+  # otherwise just dec:hex
   my $arg = shift // return("undef");
   my $refarg = ref($arg) ne "";
   my $a;
@@ -93,7 +94,7 @@ sub addrvis(_) {
     $addrvis_a2abv->{$a} = $abbr;
   }
   my $rawabbr = abbr_dec($a).":".abbr_hex($a);
-  $refarg ? reftype($arg)."<${rawabbr}>" : $rawabbr
+  $refarg ? ref($arg)."<${rawabbr}>" : $rawabbr
 }
 
 =for Pod::Coverage addrvis_forget
@@ -1562,6 +1563,7 @@ Data::Dumper::Interp - interpolate Data::Dumper output into strings for human co
   @ARGV = ('-i', '/file/path');
   my %hash = (abc => [1,2,3,4,5], def => undef);
   my $ref = \%hash;
+  my $obj = bless {}, "Foo::Bar";
 
   # Interpolate variables in strings with Data::Dumper output
   say ivis 'FYI ref is $ref\nThat hash is: %hash\nArgs are @ARGV';
@@ -1586,8 +1588,9 @@ Data::Dumper::Interp - interpolate Data::Dumper output into strings for human co
   say rvis $ref;   #prints HASH<457:1c9>{abc => [1,2,3,4,5], ...}
   
   # Just abbreviate a referent address or arbitrary number
-  say addrvis $ref;           # HASH<457:1c9>
   say addrvis refaddr($ref);  # 457:1c9
+  say addrvis $ref;           # HASH<457:1c9>
+  say addrvis $obj;           # Foo::Bar<984:ef8>
 
   # Stringify objects
   { use bigint;
@@ -1736,14 +1739,17 @@ if wide characters are present.
 =head2 addrvis NUMBER
 
 Abbreviate object addresses, showing only the last few digits
-in both decimal and hex.  The result is like I<< "HASHE<lt>457:1c9E<gt>" >>
-for references, I<< "457:1c9" >> for a plain numbers, 
-or I<"undef"> if the argument is undefined.
+in both decimal and hex.  
 
 The number of digits increases over time if necessary to keep new results 
 unambiguous.  
 Every value is remembered internally, so
 calling this with billions of unique values will use lots of memory.
+
+The result is like I<< "457:1c9" >> for plain numbers,
+I<< "HASHE<lt>457:1c9E<gt>" >> for unblessed references,
+I<< "Package::NameE<lt>457:1c9E<gt>" >> for blessed refs,
+or I<"undef"> if the argument is undefined.
 
 B<rvis> is essentially the same as
 
