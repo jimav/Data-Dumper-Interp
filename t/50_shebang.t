@@ -441,19 +441,20 @@ EOF
 # There was a bug for s/dvis called direct from outer scope, so don't use eval:
 #WAS BUG HERE: On some older platforms qr/.../ can visualize to a different,
 #longer representation, so forcing wrap to be the same on all platforms.
+my $SS = "·"; # dvis Space character Substition 
 mycheck
   'global dvis %toplex_h',
-q(%toplex_h=(
+q!%toplex_h=(
   "" => "Emp",
   A => 111,
-  "B B" => 222,
+  "B!.$SS.q!B" => 222,
   C => {d => 888,e => 999},
   D => {},
   EEEEEEEEEEEEEEEEEEEEEEEEEE => \\42,
   F_long_enough_to_force_wrap_FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
     => \\\\\\43,
   G => qr/foo.*bar/six
-)),
+)!,
   dvis('%toplex_h');
 mycheck 'global divs @ARGV', q(@ARGV=("fake","argv")), dvis('@ARGV');
 mycheck 'global divs $.', q($.=1234), dvis('$.');

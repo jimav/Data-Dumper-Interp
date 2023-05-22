@@ -49,6 +49,7 @@ use Encode ();
 use Scalar::Util qw(blessed reftype refaddr looks_like_number weaken);
 use List::Util qw(min max first all any);
 use List::Util 1.33 qw(any sum0);
+use Data::Structure::Util qw/unbless circular_off/;
 #use List::Util 1.29 qw(pairmap);
 use Clone ();
 use Regexp::Common qw/RE_balanced/;
@@ -348,6 +349,10 @@ sub __getobj_h {
   (scalar(@_) % 2)==0 or croak "Uneven number args for hash key => val pairs";
   $o ->Values([{@_}])
 }
+sub __spacedots_getobj {
+  local $Useqq = length($Useqq//"") > 1 ? $Useqq.":spacedots" : $Useqq;
+  &__getobj
+}
 
 sub visnew()  { __PACKAGE__->new() }  # shorthand
 
@@ -378,7 +383,7 @@ sub rvisq(_) { local $_ = &visq; (ref($_[0]) ? &addrvis : "").$_ }
 # interpolation code which uses $package DB to access the user's context.
 sub ivis(_) { @_=(&__getobj,          shift,'i');goto &_Interpolate }
 sub ivisq(_){ @_=(&__getobj->Useqq(0),shift,'i');goto &_Interpolate }
-sub dvis(_) { @_=(&__getobj,          shift,'d');goto &_Interpolate }
+sub dvis(_) { @_=(&__spacedots_getobj,          shift,'d');goto &_Interpolate }
 sub dvisq(_){ @_=(&__getobj->Useqq(0),shift,'d');goto &_Interpolate }
 
 ############# only internals follow ############
@@ -613,17 +618,20 @@ sub Dump {
 
 
   my @orig_values = $self->Values;
-  btw '##ORIG Values=',_dbavis(@orig_values) if $debug;
+  btw "##ORIG Values=(@orig_values)=",_dbavis(@orig_values) if $debug;
+  my $cloned_value;
   {
     croak "No Values set" if @orig_values == 0;
     croak "Only a single scalar value is allowed" if @orig_values > 1;
 
-    my $cloned_value = Clone::clone($orig_values[0]);
+    $cloned_value = Clone::clone($orig_values[0]);
     $self->{Seenhash} = {};
     $self->_preprocess(\$cloned_value, \$orig_values[0]);
     $self->Values([$cloned_value]);
   }
-  btw '##DD-IN_Values=',_dbavis($self->Values) if $debug;
+  if ($debug) { my @v = $self->Values; 
+                btw '##DD-IN_Values=(@v)',_dbavis(@v); 
+  }
 
   # We always call Data::Dumper with Indent(0) and Pad("") to get a single
   # maximally-compact string, and then manually fold the result to Foldwidth,
@@ -652,16 +660,31 @@ sub Dump {
   }
   $self->Pad($users_pad);
 
+btw "##TEMP orig_values=",_dbavis(@orig_values) if $debug;
   my $our_result;
   if ($dd_warning) {
+btw "##TEMP orig_values=",_dbavis(@orig_values) if $debug;
     eval { $our_result = $self->_postprocess_DD_result($dd_result) };
     if ($@) {
       $self->Values(\@orig_values);
       $our_result = $self->SUPER::Dump;
     }
   } else {
+btw "##TEMP orig_values=",_dbavis(@orig_values) if $debug;
     $our_result = $self->_postprocess_DD_result($dd_result);
+btw "##TEMP orig_values=",_dbavis(@orig_values) if $debug;
   }
+
+  {
+    btw "##unblessing clone $cloned_value" if $debug;
+    btw "  refaddr(cloned_value)=",u(refaddr($cloned_value)) if $debug;
+    circular_off($cloned_value); # be sure it can be garbage-collected
+btw "##TEMP orig_values=",_dbavis(@orig_values) if $debug;
+    unbless($cloned_value);      # avoid dup DESTROY calls
+btw "##TEMP orig_values=",_dbavis(@orig_values) if $debug;
+  }
+btw "##TEMP orig_values=",_dbavis(@orig_values) if $debug;
+
   &_RestorePunct;
   $our_result;
 }
@@ -727,7 +750,11 @@ btw '##         orig=",addrvis($orig_itemref)," -> ",_dbvis($$orig_itemref)' if 
       # but it appears that Clone::clone makes them writeable.
       # Anyway, use eval and just leave it as-is if the assignment fails.
       #
-      eval { $$cloned_itemref = $repl };
+      eval { 
+        circular_off $$cloned_itemref; # allow garbage collecting the clone
+        unbless $$cloned_itemref;      # avoid duplicate DESTROY calls
+        $$cloned_itemref = $repl 
+      };
       if ($@) {
         btw '##pp Item *can not* be REPLACED by ",_dbvis($repl)," ($@)' if $debug;
         return;
@@ -971,6 +998,7 @@ sub __subst_controlpics() {  # edits $_
 }
 sub __subst_spacedots() {  # edits $_
   if (/^"/) {
+    s{\N{MIDDLE DOT}}{\N{BLACK LARGE CIRCLE}}g;
     s{ }{\N{MIDDLE DOT}}g;
   }
 }
