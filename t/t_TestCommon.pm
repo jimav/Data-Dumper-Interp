@@ -50,6 +50,7 @@ BEGIN{
   STDOUT->autoflush(1);
 }
 use Test2::V0 (); # a huge collection of tools
+require Test2::Plugin::BailOnFail; 
 use POSIX ();
 
 require Exporter;
@@ -130,6 +131,9 @@ sub import {
     -no_warnings => 1,
     (map{ "!$_" } "A".."AAZ")
   );
+
+  # Stop on the first error
+  Test2::Plugin::BailOnFail->import::into($target);
 
   if (grep{ $_ eq ':silent' } @_) {
     @_ = grep{ $_ ne ':silent' } @_;
