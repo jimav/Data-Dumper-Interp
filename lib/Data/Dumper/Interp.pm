@@ -155,10 +155,10 @@ has dd => (
 );
 
 # Config values which have no counter part in Data::Dumper
-has Debug          => (is=>'rw', default => sub{ $Debug // 0            });
-has MaxStringwidth => (is=>'rw', default => sub{ $MaxStringwidth // 0   });
-has Truncsuffix    => (is=>'rw', default => sub{ $Truncsuffix // "..."  });
-has Objects        => (is=>'rw', default => sub{ $Objects // 1          });
+has Debug          => (is=>'rw', default => sub{ $Debug                 });
+has MaxStringwidth => (is=>'rw', default => sub{ $MaxStringwidth        });
+has Truncsuffix    => (is=>'rw', default => sub{ $Truncsuffix           });
+has Objects        => (is=>'rw', default => sub{ $Objects               });
 has Foldwidth      => (is=>'rw', default => sub{ 
                          $Foldwidth // do{
                            $_[0]->_set_default_Foldwidth();
@@ -222,7 +222,7 @@ sub addrvis(_) {
     while (exists $addrvis_abbrevs->{$abbrev}) {
       ++$addrvis_ndigits;
       $addrvis_abbrevs = {};
-      for my $old_a ( each %$addrvis_a2abv ) {
+      for my $old_a (keys %$addrvis_a2abv) {
         my $new_abbrev = abbr_dec($old_a);
         $addrvis_a2abv->{$old_a} = $new_abbrev;
         $addrvis_abbrevs->{$new_abbrev} = undef;
@@ -230,6 +230,7 @@ sub addrvis(_) {
       $abbrev = abbr_dec($addr);
     } 
     $addrvis_a2abv->{$addr} = $abbrev;
+    $addrvis_abbrevs->{$abbrev} = undef;
   }
   $refstr.'<'.abbr_dec($addr).':'.abbr_hex($addr).'>'
 }
@@ -331,7 +332,7 @@ sub avis(@)   { &__getobj_a ->_Vistype('a')                      ->Do; }
 sub avisq(@)  { &__getobj_a ->_Vistype('a')->Useqq(0)            ->Do; }
 sub hvis(@)   { &__getobj_h ->_Vistype('h')                      ->Do; }
 sub hvisq(@)  { &__getobj_h ->_Vistype('h')->Useqq(0)            ->Do; }
-    # 'l' variants return a bare List without parenthesis
+    # '?l' variants return a bare List without parenthesis
 sub alvis(@)  { local $_ = &avis ; s/^\(\s*//; s/\s*\)$//; $_ }  
 sub alvisq(@) { local $_ = &avisq; s/^\(\s*//; s/\s*\)$//; $_ }  
 sub hlvis(@)  { local $_ = &hvis ; s/^\(\s*//; s/\s*\)$//; $_ }  
@@ -414,6 +415,7 @@ sub Do {
     = @$self{qw/MaxStringwidth Truncsuffix Objects Debug/};
 
   $maxstringwidth = 0 if ($maxstringwidth //= 0) >= INT_MAX;
+  $truncsuffix //= "...";
   $objects = [ $objects ] unless ref($objects //= []) eq 'ARRAY';
 
   my @orig_values = $self->dd->Values;
@@ -461,6 +463,7 @@ sub visit_value {
   my $self = shift;
   say "!V value ",_dbravis2(@_) if $debug;
   my $item = shift;
+  # N.B. Not called for hash keys (short-circuited in visit_hash_key)
 
   return $item 
     if !defined($item) or reftype($item);  # undef or some kind of ref
@@ -495,6 +498,12 @@ btw '@@@repl truncating ',substr($item,0,10),"..." if $debug;
   }
   $item
 }#visit_value
+
+sub visit_hash_key {
+  my ($self, $item) = @_;
+  say "!V visit_hash_key ",_dbravis2($item) if $debug;
+  return $item; # don't truncate or otherwise munge
+}
 
 sub visit_object {
   my $self = shift;
@@ -580,22 +589,31 @@ btw '@@@repl (no overload repl, not Regexp)' if $debug;
   $item
 }#visit_object
 
-#sub visit_ref {
-#  my $self = shift;
-#  say "!V ref ",_dbravis2(@_) if $debug;
-#  $self->SUPER::visit_ref(@_);
-#}
+sub visit_ref {
+  my ($self, $item) = @_;
+  say "!V ref  ref()=",ref($item)," item=",_dbravis2($item) if $debug;
+  $self->SUPER::visit_ref($item);
+}
+
+sub visit_glob {
+  my ($self, $item) = @_;
+  say "!V glob ref()=",ref($item)," item=",_dbravis2($item) if $debug;
+  # By default Data::Visitor will create a new anon glob in the output tree.
+  # Instead, put the original into the output so the user can recognize
+  # it e.g. "*main::STDOUT" instead of an anonymous from Symbol::gensym
+  return $item
+}
 
 # This was not as good as allowing DD to put in a $VAR1 expression
 # Instead, we need to do something to break cycles in the clone to avoid
 # a memory leak!
-sub visit_seen {
-  my ($self, $data, $first_result) = @_;
-  #say "!V seen ",_dbravis2(@_) if $debug;
-  say "!V seen ",_dbravis2($first_result) if $debug; ###
-  # Replace circular reference with original ITEM<address>
-  $magic_noquotes_pfx.addrvis($data)
-}
+#sub visit_seen {
+#  my ($self, $data, $first_result) = @_;
+#  #say "!V seen ",_dbravis2(@_) if $debug;
+#  say "!V seen ",_dbravis2($first_result) if $debug; ###
+#  # Replace circular reference with original ITEM<address>
+#  $magic_noquotes_pfx.addrvis($data)
+#}
 
 #---------------------------------------------------------------------
 sub _preprocess { # Modify the cloned data

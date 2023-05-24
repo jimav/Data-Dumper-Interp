@@ -130,10 +130,6 @@ foreach (
           # ['Useqq',0,1,'utf8'],
           ['Quotekeys',0,1],
           ['Sortkeys',0,1,sub{ [ sort keys %{shift @_} ] } ],
-          # Changing Indent and Terse are no longer allowed.
-          # ['Terse',0,1],
-          # ['Indent',0,1,2,3],
-          ['Sparseseen',0,1,2,3],
         )
 {
   my ($confname, @values) = @$_;
@@ -158,6 +154,16 @@ foreach (
       }
     }
   }
+}
+
+# Changing these are not allowed:
+foreach my $confname (qw/Indent Terse Sparseseen/) {
+  no strict 'refs';
+  my $val = ${"Data::Dumper::Interp::$confname"};
+  die "\${Data::Dumper::Interp::$confname} = ",vis($val)," SHOULD NOT EXIST"
+    if defined($val);
+  eval {newvis->$confname(42)};
+  like($@,qr/locate.*method.*$confname/, "$confname method does not exist");
 }
 
 # ---------- Check formatting or interpolation --------
@@ -441,7 +447,7 @@ EOF
 # There was a bug for s/dvis called direct from outer scope, so don't use eval:
 #WAS BUG HERE: On some older platforms qr/.../ can visualize to a different,
 #longer representation, so forcing wrap to be the same on all platforms.
-my $SS = "·"; # dvis Space character Substition 
+my $SS = ($Data::Dumper::Interp::Useqq//"") =~ /dots/ ? "·" : " "; # spacedots in effect?
 mycheck
   'global dvis %toplex_h',
 q!%toplex_h=(
