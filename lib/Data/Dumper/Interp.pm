@@ -324,14 +324,14 @@ sub __spacedots_getobj {
 sub visnew()  { __PACKAGE__->new() }  # shorthand
 
 # These can be called as *FUNCTIONS* or as *METHODS*
-sub vis(_)    { &__getobj_s ->_Vistype('s')                      ->Do; }
-sub visq(_)   { &__getobj_s ->_Vistype('s')->Useqq(0)            ->Do; }
-sub viso(_)   { &__getobj_s ->_Vistype('s')->Objects(0)->Useqq(0)->Do; }
-sub visoq(_)  { &__getobj_s ->_Vistype('s')->Objects(0)          ->Do; }
-sub avis(@)   { &__getobj_a ->_Vistype('a')                      ->Do; }
-sub avisq(@)  { &__getobj_a ->_Vistype('a')->Useqq(0)            ->Do; }
-sub hvis(@)   { &__getobj_h ->_Vistype('h')                      ->Do; }
-sub hvisq(@)  { &__getobj_h ->_Vistype('h')->Useqq(0)            ->Do; }
+sub vis(_)    { &__getobj_s ->_Vistype('s')                      ->_Do; }
+sub visq(_)   { &__getobj_s ->_Vistype('s')->Useqq(0)            ->_Do; }
+sub viso(_)   { &__getobj_s ->_Vistype('s')->Objects(0)->Useqq(0)->_Do; }
+sub visoq(_)  { &__getobj_s ->_Vistype('s')->Objects(0)          ->_Do; }
+sub avis(@)   { &__getobj_a ->_Vistype('a')                      ->_Do; }
+sub avisq(@)  { &__getobj_a ->_Vistype('a')->Useqq(0)            ->_Do; }
+sub hvis(@)   { &__getobj_h ->_Vistype('h')                      ->_Do; }
+sub hvisq(@)  { &__getobj_h ->_Vistype('h')->Useqq(0)            ->_Do; }
     # '?l' variants return a bare List without parenthesis
 sub alvis(@)  { local $_ = &avis ; s/^\(\s*//; s/\s*\)$//; $_ }  
 sub alvisq(@) { local $_ = &avisq; s/^\(\s*//; s/\s*\)$//; $_ }  
@@ -404,7 +404,7 @@ my $magic_keepquotes_pfx = "<KQMagic$unique>";
 #---------------------------------------------------------------------------
 my ($maxstringwidth, $truncsuffix, $objects, $debug);
 
-sub Do {
+sub _Do {
   oops unless @_ == 1;
   my $self = $_[0];
 
@@ -938,10 +938,10 @@ sub _mycallloc(;@) {
 }
 
 use constant {
-  WRAP_ALWAYS  => 1,
-  WRAP_ALLHASH => 2,
+  _WRAP_ALWAYS  => 1,
+  _WRAP_ALLHASH => 2,
 };
-use constant WRAP_STYLE => (WRAP_ALLHASH);
+use constant _WRAP_STYLE => (_WRAP_ALLHASH);
 
 sub _postprocess_DD_result {
   (my $self, local $_) = @_;
@@ -1060,14 +1060,14 @@ sub _postprocess_DD_result {
   # At any nesting level, if everything (including any nested levels) fits
   # on a single line, then that part is output without folding;
   #
-  # 4/25/2023: Added the (non-public) config constant WRAP_STYLE;
+  # 4/25/2023: Added the (non-public) config constant _WRAP_STYLE;
   #
-  # WRAP_STYLE == WRAP_ALWAYS:
+  # _WRAP_STYLE == _WRAP_ALWAYS:
   #
   # If folding is necessary, then *every* member of the folded block
   # appears on a separate line, so members all vertically align.
   #
-  # (WRAP_STYLE & WRAP_ALLHASH): Members of a hash (key => value) 
+  # (_WRAP_STYLE & _WRAP_ALLHASH): Members of a hash (key => value) 
   # are shown on separate lines, but not members of an array.
   #
   # Otherwise:
@@ -1135,13 +1135,13 @@ sub _postprocess_DD_result {
     # If all children individually fit then run them all together, 
     # wrapping only between siblings; otherwise start each sibling on 
     # it's own line so they line up vertically.
-    # [4/25/2023: Now controlled by WRAP_STYLE]
+    # [4/25/2023: Now controlled by _WRAP_STYLE]
 
     my $available = $maxlinelen - $linelen;
     my $indent_width = $level * $indent_unit;
 
     my $run_together = 
-      (WRAP_STYLE & WRAP_ALWAYS)==0
+      (_WRAP_STYLE & _WRAP_ALWAYS)==0
       &&
       all{ (ref() ? $_->{tlen} : length) <= $available } @{$parent->{children}}
       ;
@@ -2017,11 +2017,12 @@ Jim Avera  (jim.avera AT gmail)
 =for nobody Foldwidth1 is currently an undocumented experimental method
 =for nobody which sets a different fold width for the first line only.
 =for nobody
-=for nobody Terse & Indent methods exist to croak; using them is not allowed.
+=for nobody viso & visoq are also undocumented experimental
+=for nobody
 =for nobody oops is an internal function (called to die if bug detected).
+=for nobody
 =for nobody The Debug method is for author's debugging, and not documented.
-=for nobody BLK_* CLOSER S_CLOSER NS_CLOSER FLAGS_MASK NOOP OPENER are internal "constants".
 
-=for Pod::Coverage Foldwidth1 Terse Indent oops Debug
+=for Pod::Coverage viso visoq Foldwidth1 oops Debug
 
 =cut

@@ -9,8 +9,8 @@
 #   Everything not specifically test-related is in the separate
 #   module t_Common (which is not necessairly just for tests).
 #
-#   Loads Test2::V0, which sets UTF-8 encoding/decoding for test-harness
-#   streams (but *not* STD* or new filehandles).  And imports 'utf8'.
+#   Loads Test2::V0, which sets UTF-8 encoding/decoding for test-harnes
+#   streasm (but *not* STD* or new filehandles).  And imports 'utf8'.
 #
 #   Makes STDIN, STDOUT & STDERR UTF-8 auto de/encode
 #
