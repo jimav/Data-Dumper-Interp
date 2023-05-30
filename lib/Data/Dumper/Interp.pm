@@ -11,6 +11,7 @@ use 5.011;  # cpantester gets warning that 5.11 is the minimum acceptable
 use 5.018;  # lexical_subs
 use feature qw(say state lexical_subs current_sub);
 use feature 'lexical_subs'; 
+
 no warnings "experimental::lexical_subs";
 
 package  Data::Dumper::Interp;
@@ -26,7 +27,10 @@ package
 }
 
 package Data::Dumper::Interp;
+
 use Moose;
+no warnings "experimental::lexical_subs"; # un-do Moose forcing these on!!
+
 extends qw(Data::Visitor);
 
 use Data::Dumper ();
