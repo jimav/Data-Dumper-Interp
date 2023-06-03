@@ -1810,7 +1810,7 @@ The avilable options are:
 
 Printable ("graphic")
 characters are shown as themselves rather than hex escapes, and
-'\n', '\t', etc. are shown for common ASCII control codes.
+'\n', '\t', etc. are shown for ASCII control codes.
 
 =item "controlpics"
 
