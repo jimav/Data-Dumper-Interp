@@ -251,7 +251,12 @@ $_ = "GroupA.GroupB";
 { my $code = 'qshpath($_)';          mycheck $code, "${_}",   eval $code; }
 { my $code = 'qshpath()';            mycheck $code, "${_}",   eval $code; }
 { my $code = 'qshpath';              mycheck $code, "${_}",   eval $code; }
-{ my $code = q(qshlist("a b","c",'$d')); mycheck $code, q("a b" c '$d'),  eval $code; }
+
+if ($^O eq "MSWin32") {
+  { my $code = q(qshlist("a b","c",'$d')); mycheck $code, q("a b" c "$d"),  eval $code; }
+} else {
+  { my $code = q(qshlist("a b","c",'$d')); mycheck $code, q("a b" c '$d'),  eval $code; }
+}
 
 # Basic checks
 { my $code = 'vis($_)'; mycheck $code, "\"${_}\"", eval $code; }
