@@ -1,6 +1,4 @@
-Revision history for Perl extension Data-Dumper-Interp
+(Recent) Revision history for Perl extension Data-Dumper-Interp
 
-{{$NEXT}}
-
-    - original version
+5.025 - qsh() now quotes for cmd.com on windows (instead of /bin/sh)
 

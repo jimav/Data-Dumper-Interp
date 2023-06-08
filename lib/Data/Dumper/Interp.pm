@@ -10,7 +10,7 @@ use strict; use warnings FATAL => 'all'; use utf8;
 use 5.011;  # cpantester gets warning that 5.11 is the minimum acceptable
 use 5.018;  # lexical_subs
 use feature qw(say state lexical_subs current_sub);
-use feature 'lexical_subs'; 
+use feature 'lexical_subs';
 
 no warnings "experimental::lexical_subs";
 
@@ -18,10 +18,10 @@ package  Data::Dumper::Interp;
 # VERSION from Dist::Zilla::Plugin::OurPkgVersion
 # DATE from Dist::Zilla::Plugin::OurDate
 
-package  
+package
   # newline so Dist::Zilla::Plugin::PkgVersion won't add $VERSION
         DB {
-  sub DB_Vis_Evalwrapper { 
+  sub DB_Vis_Evalwrapper {
     eval $Data::Dumper::Interp::string_to_eval; ## no critic
   }
 }
@@ -140,7 +140,7 @@ has dd => (
   is => 'ro',
   lazy => 1,
   isa => 'Data::Dumper',
-  default => sub{ 
+  default => sub{
     my $self = shift;
     Data::Dumper->new([],[])
       ->Terse(1)
@@ -163,10 +163,10 @@ has Debug          => (is=>'rw', default => sub{ $Debug                 });
 has MaxStringwidth => (is=>'rw', default => sub{ $MaxStringwidth        });
 has Truncsuffix    => (is=>'rw', default => sub{ $Truncsuffix           });
 has Objects        => (is=>'rw', default => sub{ $Objects               });
-has Foldwidth      => (is=>'rw', default => sub{ 
+has Foldwidth      => (is=>'rw', default => sub{
                          $Foldwidth // do{
                            $_[0]->_set_default_Foldwidth();
-                           $Foldwidth             
+                           $Foldwidth
                          }
                        });
 has Foldwidth1     => (is=>'rw', default => sub{ $Foldwidth1            });
@@ -189,7 +189,7 @@ around       [qw/Values Useqq Quotekeys Trailingcomma Pad Varname Quotekeys
   }
   $self->$orig
 };
- 
+
 ############### Utility Functions #################
 
 #---------------------------------------------------------------------------
@@ -199,7 +199,7 @@ around       [qw/Values Useqq Quotekeys Trailingcomma Pad Varname Quotekeys
 # If a ref the result is REFTYPEorOBJTYPE<dec:hex> otherwise just <dec:hex>
 our $addrvis_ndigits = 3;
 our $addrvis_a2abv   = {}; # address => abbreviated digits
-our $addrvis_abbrevs = {}; # abbreviated digits => undef 
+our $addrvis_abbrevs = {}; # abbreviated digits => undef
 sub addrvis_forget(;$) {
   $addrvis_ndigits = $_[0] || 3;
   $addrvis_a2abv   = {};
@@ -211,14 +211,14 @@ sub addrvis(_) {
   my $addr;
   if ($refstr ne "")              { $addr = refaddr($arg) }
   elsif (looks_like_number($arg)) { $addr = $arg }
-  else { 
+  else {
     carp("addrvis arg '$arg' is neither a ref or a number\n");
     return ""
   }
 
-  my sub abbr_hex($) { 
+  my sub abbr_hex($) {
        substr(sprintf("%0*x", $addrvis_ndigits, $_[0]), -$addrvis_ndigits) }
-  my sub abbr_dec($) { 
+  my sub abbr_dec($) {
        substr(sprintf("%0*d", $addrvis_ndigits, $_[0]), -$addrvis_ndigits) }
 
   if (! exists $addrvis_a2abv->{$addr}) {
@@ -230,9 +230,9 @@ sub addrvis(_) {
         my $new_abbrev = abbr_dec($old_a);
         $addrvis_a2abv->{$old_a} = $new_abbrev;
         $addrvis_abbrevs->{$new_abbrev} = undef;
-      } 
+      }
       $abbrev = abbr_dec($addr);
-    } 
+    }
     $addrvis_a2abv->{$addr} = $abbrev;
     $addrvis_abbrevs->{$abbrev} = undef;
   }
@@ -243,6 +243,8 @@ sub addrvis(_) {
 
 =cut
 
+sub u(_) { $_[0] // "undef" }
+sub quotekey(_); # forward.  Implemented after regex declarations.
 
 sub __stringify($) {
   if (defined(my $class = blessed($_[0]))) {
@@ -251,25 +253,34 @@ sub __stringify($) {
   $_[0]
 }
 
-sub u(_) { $_[0] // "undef" }
-sub quotekey(_); # forward.  Implemented after regex declarations.
+use constant _SHELL_UNSAFE_REGEX =>
+  ($^O eq "MSWin32" ? qr/[^-=\w_:\.,\\]/ : qr/[^-=\w_\/:\.,]/);
 
 sub __forceqsh(_) {
-  # Unlike Perl, /bin/sh does not recognize any backslash escapes in '...'
   local $_ = shift;
   return "undef" if !defined;  # undef without quotes
   $_ = vis($_) if ref;
-  # Prefer "double quoted" if no shell escapes would be needed
-  if (/["\$`!\\\x{00}-\x{1F}\x{7F}]/) {
-    s/'/'\\''/g; # foo'bar => foo'\''bar
-    return "'${_}'";
+  if ($^O eq "MSWin32") {
+    # Backslash usually need not be protected, except:
+    #  \" quotes the " whether inside "quoes" or bare (!)
+    #  \\ quotes the \ ONLY(?) if immediately followed by \"
+    s/\\(?=")/\\\\/g;
+    s/"/\\"/g;
+    return "\"${_}\"";  # 6/7/23: UNtested
   } else {
-    return "\"${_}\"";
+    # Prefer "double quoted" if no shell escapes would be needed.
+    if (/["\$`!\\\x{00}-\x{1F}\x{7F}]/) {
+      # Unlike Perl, /bin/sh does not recognize any backslash escapes in '...'
+      s/'/'\\''/g; # foo'bar => foo'\''bar
+      return "'${_}'";
+    } else {
+      return "\"${_}\"";
+    }
   }
 }
 sub qsh(_) {
   local $_ = __stringify(shift());
-  defined && !ref && !/[^-=\w_\/:\.,]/
+  defined && !ref && ($_ !~ _SHELL_UNSAFE_REGEX)
     && $_ ne "" && $_ ne "undef" ? $_ : __forceqsh
 }
 sub qshpath(_) {  # like qsh but does not quote initial ~ or ~username
@@ -337,15 +348,15 @@ sub avisq(@)  { &__getobj_a ->_Vistype('a')->Useqq(0)            ->_Do; }
 sub hvis(@)   { &__getobj_h ->_Vistype('h')                      ->_Do; }
 sub hvisq(@)  { &__getobj_h ->_Vistype('h')->Useqq(0)            ->_Do; }
     # '?l' variants return a bare List without parenthesis
-sub alvis(@)  { local $_ = &avis ; s/^\(\s*//; s/\s*\)$//; $_ }  
-sub alvisq(@) { local $_ = &avisq; s/^\(\s*//; s/\s*\)$//; $_ }  
-sub hlvis(@)  { local $_ = &hvis ; s/^\(\s*//; s/\s*\)$//; $_ }  
-sub hlvisq(@) { local $_ = &hvisq; s/^\(\s*//; s/\s*\)$//; $_ }  
+sub alvis(@)  { local $_ = &avis ; s/^\(\s*//; s/\s*\)$//; $_ }
+sub alvisq(@) { local $_ = &avisq; s/^\(\s*//; s/\s*\)$//; $_ }
+sub hlvis(@)  { local $_ = &hvis ; s/^\(\s*//; s/\s*\)$//; $_ }
+sub hlvisq(@) { local $_ = &hvisq; s/^\(\s*//; s/\s*\)$//; $_ }
 
 # TODO: Integrate this more deeply to avoid duplicating information when
 #       $v -> blessed and the object does *not* stringify.  Currently we get:
 #          "HASH<584:4b8>Foo::Bar=HASH(0x5555558fd4b8)"
-#       Stringifying objects are ok, e.g. 
+#       Stringifying objects are ok, e.g.
 #          "HASH<632:c38>(Math::BigInt)32"
 sub rvis(_)  { local $_ = &vis ; (ref($_[0]) ? &addrvis : "").$_ }
 sub rvisq(_) { local $_ = &visq; (ref($_[0]) ? &addrvis : "").$_ }
@@ -362,9 +373,9 @@ sub dvisq(_){ @_=(&__getobj->Useqq(0),shift,'d');goto &_Interpolate }
 BEGIN {
   if (! Data::Dumper->can("Maxrecurse")) {
     # Supply if missing in older Data::Dumper
-    eval q(sub Data::Dumper::Maxrecurse { 
+    eval q(sub Data::Dumper::Maxrecurse {
              my($s, $v) = @_;
-             @_ == 2 ? (($s->{Maxrecurse} = $v), return $s) 
+             @_ == 2 ? (($s->{Maxrecurse} = $v), return $s)
                      : $s->{Maxrecurse}//0;
            });
     die $@ if $@;
@@ -469,7 +480,7 @@ sub visit_value {
   my $item = shift;
   # N.B. Not called for hash keys (short-circuited in visit_hash_key)
 
-  return $item 
+  return $item
     if !defined($item) or reftype($item);  # undef or some kind of ref
 
   # Prepend a "magic prefix" (later removed) to items which Data::Dumper is
@@ -485,7 +496,7 @@ sub visit_value {
   #
   #  2. Floating point values come out as "strings" to avoid some
   #     cross-platform issue.  For our purposes we want all numbers
-  #     to appear unquoted. 
+  #     to appear unquoted.
   #
   if (looks_like_number($item) && $item !~ /^0\d/) {
     my $prefix = _show_as_number($item) ? $magic_noquotes_pfx
@@ -637,7 +648,7 @@ btw '##         orig=",addrvis($orig_itemref)," -> ",_dbvis($$orig_itemref)' if 
   # About TIED VARIABLES:
   # We must never modify a tied variable because of user-defined side-effects.
   # So when we want to replace a tied variable we untie it first, if possible.
-  # N.B. The whole structure was cloned, so this does not untie the 
+  # N.B. The whole structure was cloned, so this does not untie the
   # user's variables.
   #
   # All modifications (untie and over-writing) is done in eval{...} in case
@@ -648,7 +659,7 @@ btw '##         orig=",addrvis($orig_itemref)," -> ",_dbvis($$orig_itemref)' if 
   # other refs, and doesn't actually make everything mutable; it was a big mess
   # so now taking the simple way out.
 
-    # Side note: Taking a ref to a member of a tied container, 
+    # Side note: Taking a ref to a member of a tied container,
     # e.g. \$tiedhash{key}, actually returns an overloaded object or some other
     # magical thing which, every time it is de-referenced, FETCHes the datum
     # into a temporary.
@@ -660,7 +671,7 @@ btw '##         orig=",addrvis($orig_itemref)," -> ",_dbvis($$orig_itemref)' if 
     # I still have to untie variables before over-writing them with substitute
     # content.
 
-  # Note: Our Item is only ever a scalar, either the top-level item from the 
+  # Note: Our Item is only ever a scalar, either the top-level item from the
   # user or a member of a container we unroll below.  In either case the
   # scalar could be either a ref to something or a non-ref value.
 
@@ -672,7 +683,7 @@ btw '##         orig=",addrvis($orig_itemref)," -> ",_dbvis($$orig_itemref)' if 
       $$cloned_itemref = $copy; # n.b. $copy might be a ref to a tied variable
       oops if tied($$cloned_itemref);
     }
-  
+
     if (defined(my $repl = $self->_replacement($$orig_itemref))) {
       btw '##pp Item REPLACED by ",_dbvis($repl)' if $debug;
       # If the item is $#array then the following assignment will try to
@@ -681,10 +692,10 @@ btw '##         orig=",addrvis($orig_itemref)," -> ",_dbvis($$orig_itemref)' if 
       # but it appears that Clone::clone makes them writeable.
       # Anyway, use eval and just leave it as-is if the assignment fails.
       #
-      eval { 
+      eval {
         circular_off $$cloned_itemref; # allow garbage collecting the clone
         unbless $$cloned_itemref;      # avoid duplicate DESTROY calls
-        $$cloned_itemref = $repl 
+        $$cloned_itemref = $repl
       };
       if ($@) {
         btw '##pp Item *can not* be REPLACED by ",_dbvis($repl)," ($@)' if $debug;
@@ -692,18 +703,18 @@ btw '##         orig=",addrvis($orig_itemref)," -> ",_dbvis($$orig_itemref)' if 
       }
       return
     }
-  
+
     my $rt = reftype($$cloned_itemref) // ""; # "" if item is not a ref
     if (reftype($cloned_itemref) eq "SCALAR") {
       oops if $rt;
       btw '##pp item is non-ref scalar; stop.' if $debug;
       return
     }
-  
+
     # Item is some kind of ref
     oops unless reftype($cloned_itemref) eq "REF";
     oops unless reftype($orig_itemref) eq "REF";
-  
+
     if ($rt eq "SCALAR" || $rt eq "LVALUE" || $rt eq "REF") {
       btw '##pp dereferencing ref-to-scalarish $rt' if $debug;
       $self->_preprocess($$cloned_itemref, $$orig_itemref);
@@ -893,7 +904,7 @@ sub __unesc_unicode() {  # edits $_
        $_ = $_ > 0x10FFFF ? "\0" : chr($_); # 10FFFF is Unicode limit
        # Using 'lc' so regression tests do not depend on Data::Dumper's
        # choice of case when escaping wide characters.
-       (m<\P{XPosixGraph}|[\0-\177]> 
+       (m<\P{XPosixGraph}|[\0-\177]>
           || m<\p{General_Category=Format}>) ? lc($orig) : $_
      /xesg;
   }
@@ -982,13 +993,13 @@ sub _postprocess_DD_result {
 
     if ($prepending) { $_ = $prepending . $_; $prepending = ""; }
 
-    btw "###atom",_mycallloc(), _dbrawstr($_),"($mode)" 
+    btw "###atom",_mycallloc(), _dbrawstr($_),"($mode)"
       ,"\n context:",_dbvisnew($context)->Sortkeys(sub{[grep{exists $_[0]->{$_}} qw/O C tlen children CLOSE_AFTER_NEXT/]})->Dump()
       if $debug;
     if ($mode eq "prepend_to_next") {
       $prepending .= $_;
     } else {
-      if ($mode eq "") { 
+      if ($mode eq "") {
         push @{ $context->{children} }, $_;
       }
       elsif ($mode eq "open") {
@@ -1071,7 +1082,7 @@ sub _postprocess_DD_result {
   # If folding is necessary, then *every* member of the folded block
   # appears on a separate line, so members all vertically align.
   #
-  # (_WRAP_STYLE & _WRAP_ALLHASH): Members of a hash (key => value) 
+  # (_WRAP_STYLE & _WRAP_ALLHASH): Members of a hash (key => value)
   # are shown on separate lines, but not members of an array.
   #
   # Otherwise:
@@ -1087,30 +1098,30 @@ sub _postprocess_DD_result {
   # might be shown as
   #    [ aaa,bbb,  # N.B. space inserted before aaa to line up with next level
   #      [ ccc,ddd,  # packed because all siblings fit individually
-  #        [eee,fff,hhhhhhhhhhhhhhhhhhhhh,{key => value}] # entirely fits 
+  #        [eee,fff,hhhhhhhhhhhhhhhhhhhhh,{key => value}] # entirely fits
   #      ]
   #    ]
   # but if Foldwidth is smaller then like this:
-  #    [ aaa,bbb,  
+  #    [ aaa,bbb,
   #      [ ccc,  # sibs vertically-aligned because not all of them fit
   #        ddd,
   #        [ eee,fff,  # but within this level, all siblings fit
-  #          hhhhhhhhhhhhhhhhhhhhh, 
+  #          hhhhhhhhhhhhhhhhhhhhh,
   #          {key => value}
   #        ]
   #      ]
   #    ]
   # or if Foldwidth is very small then:
   #    [ aaa,
-  #      bbb,  
+  #      bbb,
   #      [ ccc,
   #        ddd,
   #        [ eee,
   #          fff,
-  #          hhhhhhhhhhhhhhhhhhhhh, 
-  #          { key 
-  #            => 
-  #            value 
+  #          hhhhhhhhhhhhhhhhhhhhh,
+  #          { key
+  #            =>
+  #            value
   #          }
   #        ]
   #      ]
@@ -1118,48 +1129,48 @@ sub _postprocess_DD_result {
   #
   # Note: Indentation is done regardless of Foldwidth, so deeply nested
   # structures may extend beyond Foldwidth even if all elements are short.
-  
+
   my $foldwidthN = $foldwidth || INT_MAX;
   my $maxlinelen = $foldwidth1 || $foldwidthN;
   $foldwidthN -= length($pad);
   $maxlinelen -= length($pad);
 
-  my $outstr; 
+  my $outstr;
   my $linelen;
   our $level;
   my sub expand_children($) {
-    my $parent = shift; 
+    my $parent = shift;
     # $level is already set appropriately for $parent->{children},
     # and the parent's {opener} is at the end of $outstr.
     #
     # Intially we are called with a fake parent ($top) containing
-    # no {opener} and the top-most item as its only child, with $level==0; 
+    # no {opener} and the top-most item as its only child, with $level==0;
     # this puts the top item at the left margin.
     #
-    # If all children individually fit then run them all together, 
-    # wrapping only between siblings; otherwise start each sibling on 
+    # If all children individually fit then run them all together,
+    # wrapping only between siblings; otherwise start each sibling on
     # it's own line so they line up vertically.
     # [4/25/2023: Now controlled by _WRAP_STYLE]
 
     my $available = $maxlinelen - $linelen;
     my $indent_width = $level * $indent_unit;
 
-    my $run_together = 
+    my $run_together =
       (_WRAP_STYLE & _WRAP_ALWAYS)==0
       &&
       all{ (ref() ? $_->{tlen} : length) <= $available } @{$parent->{children}}
       ;
 
     if (!$run_together
-        && @{$parent->{children}}==3 
+        && @{$parent->{children}}==3
         && !ref(my $item=$parent->{children}->[1])) {
-      # Concatenate (key,=>) if possible 
+      # Concatenate (key,=>) if possible
       if ($item =~ /\A *=> *\z/) {
         $run_together = 1;
         btw "#     (level $level): Running together $parent->{children}->[0] => value" if $debug;
       }
     }
-      
+
     my $indent = ' ' x $indent_width;
 
     btw "###expand",_mycallloc(), "level $level, avail=$available",
@@ -1196,7 +1207,7 @@ sub _postprocess_DD_result {
         }
         if (!$fits || !$run_together) {
           # start a second+ line
-          $outstr =~ s/ +\z//;  
+          $outstr =~ s/ +\z//;
           $outstr .= "\n$indent";
           $linelen = $indent_width;
 
@@ -1218,15 +1229,15 @@ sub _postprocess_DD_result {
         $linelen += length($child->{O});
         if (! $fits && $child->{O} ne "") {
           # Wrap before first child, if there is a real opener (not for '=>')
-          $outstr =~ s/ +\z//;  
+          $outstr =~ s/ +\z//;
           $outstr .= "\n$indent" . (' ' x $indent_unit);
           $linelen = $indent_width + $indent_unit;
           btw "#     (l $level): Wrap after opener: os=",_dbstr($outstr) if $debug;
         }
-        __SUB__->($child); 
+        __SUB__->($child);
         if (! $fits && $child->{O} ne "") {
           # Wrap before closer if we wrapped after opener
-          $outstr =~ s/ +\z//;  
+          $outstr =~ s/ +\z//;
           $outstr .= "\n$indent";
           $linelen = $indent_width;
           btw "#     (l $level): Wrap after closer; ll=$linelen os=",_dbstr($outstr) if $debug;
@@ -1243,7 +1254,7 @@ sub _postprocess_DD_result {
       $first = 0;
     }
   }#expand_children
-  
+
 
   while ((pos()//0) < length) {
        if (/\G[\\\*\!]/gc)                       { atom($&, "prepend_to_next") }
@@ -1266,10 +1277,10 @@ sub _postprocess_DD_result {
     elsif (/\G[\[\{\(]/gc)                    { atom($&, "open") }
     elsif (/\G[\]\}\)]/gc)                    { atom($&, "close") }
     elsif (/\G\s+/sgc)                        {          }
-    else { 
+    else {
       my $remnant = substr($_,pos//0);
       Carp::cluck "UNPARSED ",_dbstr(substr($remnant,0,30)."..."),"  ",_dbstrposn($_,pos()//0),"\nFULL STRING:",_dbstr($_),"\n(Using remainder as-is)\n" ;
-      atom($remnant); 
+      atom($remnant);
       while (defined $context->{parent}) { atom("", "close"); }
       last;
     }
@@ -1281,7 +1292,7 @@ sub _postprocess_DD_result {
   $outstr = "";
   $linelen = 0;
   $level = 0;
-  expand_children($top); 
+  expand_children($top);
 
   if (($vistype//'s') eq 's') {
   }
@@ -1297,7 +1308,7 @@ sub _postprocess_DD_result {
   if ($pad) {
     $outstr =~ s/\n\K(?=[^\n])/$pad/g;
   }
-  
+
   $outstr
 } #_postprocess_DD_result {
 
@@ -1545,7 +1556,7 @@ Data::Dumper::Interp - interpolate Data::Dumper output into strings for human co
 
   # Format a reference with abbreviated referent address
   say rvis $ref;   #prints HASH<457:1c9>{abc => [1,2,3,4,5], ...}
-  
+
   # Just abbreviate a referent address or arbitrary number
   say addrvis refaddr($ref);  # 457:1c9
   say addrvis $ref;           # HASH<457:1c9>
@@ -1698,10 +1709,10 @@ if wide characters are present.
 =head2 addrvis NUMBER
 
 Abbreviate object addresses, showing only the last few digits
-in both decimal and hex.  
+in both decimal and hex.
 
-The number of digits increases over time if necessary to keep new results 
-unambiguous.  
+The number of digits increases over time if necessary to keep new results
+unambiguous.
 
 The result is like I<< "E<lt>457:1c9E<gt>" >> for plain numbers,
 I<< "HASHE<lt>457:1c9E<gt>" >> for unblessed references,
@@ -1868,7 +1879,8 @@ otherwise a "quoted string".
 =head2 qsh [$string]
 
 The string ($_ by default) is quoted if necessary for parsing
-by /bin/sh, which has different quoting rules than Perl.
+by the shell (/bin/sh), which has different quoting rules than Perl.
+On Win32 quoting is for cmd.com.
 
 If the string contains only "shell-safe" ASCII characters
 it is returned as-is, without quotes.
