@@ -15,6 +15,7 @@ use feature 'lexical_subs';
 no warnings "experimental::lexical_subs";
 
 package  Data::Dumper::Interp;
+{ no strict 'refs'; ${__PACKAGE__."::VER"."SION"} = 997.999; }
 # VERSION from Dist::Zilla::Plugin::OurPkgVersion
 # DATE from Dist::Zilla::Plugin::OurDate
 
