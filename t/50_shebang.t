@@ -29,10 +29,22 @@ use Data::Compare qw(Compare);
 # on certain Windows machines.  Try to explicitly 'fail' instead of 
 # actually dieing.
 $SIG{__DIE__} = sub {
-  if ($^S) { 
-    die(@_); # in eval or compile time
+  if ($^S or !defined($^S)) { 
+    die(@_); # in eval or at compile time
   } else {
-    fail(@_);
+    my $via_carp;
+    for (my $i=0; ;$i++) {
+      my $pkg = caller($i) || last;
+      if ($pkg eq "Carp") {
+        $via_carp=1;
+        last;
+      }
+    }
+    if ($via_carp) {
+      fail(@_);
+    } else {
+      fail(Carp::longmess(@_));
+    }
     bail_out("die trapped");
   }
 };
