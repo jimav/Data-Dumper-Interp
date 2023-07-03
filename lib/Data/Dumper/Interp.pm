@@ -383,33 +383,32 @@ BEGIN {
   }
 }
 
-sub _set_default_Foldwidth() {
-  my $self = shift;
+sub _get_terminal_width() {  # returns undef if unknowable
   if (u($ENV{COLUMNS}) =~ /^[1-9]\d*$/) {
-    $Foldwidth = $ENV{COLUMNS}; # overrides actual terminal width
-    btw "Default Foldwidth=$Foldwidth from ENV{COLUMNS}" if $self->Debug;
+    return $ENV{COLUMNS}; # overrides actual terminal width
   } else {
     local *_; # Try to avoid clobbering special filehandle "_"
     # This does not actualy work; https://github.com/Perl/perl5/issues/19142
 
-    _SaveAndResetPunct();
-    # Suppress hard-coded "didn't work" warning from Term::ReadKey when
-    # the terminal size can not be determined via any method
-    my $wmsg = ""; local $SIG{'__WARN__'} = sub { $wmsg .= $_[0] };
-    my ($width, $height) = Term::ReadKey::GetTerminalSize(
-      -t STDERR ? *STDERR : -t STDOUT ? *STDOUT
-      : do{my $fh; for("/dev/tty",'CONOUT$') { last if open $fh, $_ } $fh}
-    );
-    warn $wmsg if $wmsg && $wmsg !~ /did.*n.*work/i;
-
-    if (($Foldwidth = $width)) {
-      btw "Default Foldwidth=$Foldwidth from Term::ReadKey" if $self->Debug;
-    } else {
-      $Foldwidth = 80;
-      btw "Foldwidth=$Foldwidth from hard-coded backup default" if $self->Debug;
-    }
-    _RestorePunct();
+    my $fh = -t STDERR ? *STDERR : 
+             -t STDOUT ? *STDOUT :
+             -t STDIN  ? *STDIN  :
+        do{my $fh; for("/dev/tty",'CONOUT$') { last if open $fh, $_ } $fh} ;
+    my $wmsg = ""; # Suppress hard-coded "didn't work" from Term::ReadKey
+                   #  or "stty: standard input: Not a tty" etc.
+    my ($width, $height) = do {
+      local $SIG{'__WARN__'} = sub { $wmsg .= $_[0] };
+      $fh ? Term::ReadKey::GetTerminalSize($fh) : ()
+    };
+    return $width; # possibly undef
   }
+}
+
+sub _set_default_Foldwidth() {
+  my $self = shift;
+  _SaveAndResetPunct();
+  $Foldwidth = _get_terminal_width // 80;
+  _RestorePunct();
   undef $Foldwidth1;
 }
 
