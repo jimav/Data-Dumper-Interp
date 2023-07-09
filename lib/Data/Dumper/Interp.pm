@@ -44,11 +44,17 @@ use Term::ReadKey ();
 use overload ();
 
 use Exporter 'import';
-our @EXPORT    = qw(visnew
-                    vis  viso  avis  alvis  ivis  dvis  hvis  hlvis
-                    visq visoq avisq alvisq ivisq dvisq hvisq hlvisq
-                    addrvis rvis rvisq
-                    u quotekey qsh qshlist __forceqsh qshpath);
+our @EXPORT    = qw( visnew
+
+                     vis visq avis avisq hvis hvisq
+                     alvis alvisq hlvis hlvisq
+                     viso visoq
+                     rvis rvisq ravis ravisq rhvis rhvisq
+
+                     ivis ivisq dvis dvisq
+                     addrvis
+                     u quotekey qsh qshlist qshpath
+                   );
 
 our @EXPORT_OK = qw($Debug $MaxStringwidth $Truncsuffix $Objects $Foldwidth
                     $Useqq $Quotekeys $Sortkeys
@@ -172,7 +178,15 @@ has Foldwidth      => (is=>'rw', default => sub{
                        });
 has Foldwidth1     => (is=>'rw', default => sub{ $Foldwidth1            });
 
-has _Vistype       => (is=>'rw', default => undef);
+sub _Vistype {
+  my ($s, $v) = @_;
+  # Replace anything other than 'r' (the addrvis-prefix flag).
+  # This is so when rdvis() et al. reuses the object but we don't
+  # loose 'r' flag after the first interpolcation.
+  @_ >= 2 ? (($s->{_Vistype} = (index($s->{_Vistype}//"",'r')>=0 ? 'r':'').$v),
+             return $s)
+          : $s->{_Vistype}
+}
 
 # Make "setters" return the outer object $self
 around       [qw/Values Useqq Quotekeys Trailingcomma Pad Varname Quotekeys
@@ -340,27 +354,27 @@ sub __spacedots_getobj {
 sub visnew()  { __PACKAGE__->new() }  # shorthand
 
 # These can be called as *FUNCTIONS* or as *METHODS*
-sub vis(_)    { &__getobj_s ->_Vistype('s')                      ->_Do; }
-sub visq(_)   { &__getobj_s ->_Vistype('s')->Useqq(0)            ->_Do; }
-sub viso(_)   { &__getobj_s ->_Vistype('s')->Objects(0)->Useqq(0)->_Do; }
-sub visoq(_)  { &__getobj_s ->_Vistype('s')->Objects(0)          ->_Do; }
-sub avis(@)   { &__getobj_a ->_Vistype('a')                      ->_Do; }
-sub avisq(@)  { &__getobj_a ->_Vistype('a')->Useqq(0)            ->_Do; }
-sub hvis(@)   { &__getobj_h ->_Vistype('h')                      ->_Do; }
-sub hvisq(@)  { &__getobj_h ->_Vistype('h')->Useqq(0)            ->_Do; }
-    # '?l' variants return a bare List without parenthesis
-sub alvis(@)  { local $_ = &avis ; s/^\(\s*//; s/\s*\)$//; $_ }
-sub alvisq(@) { local $_ = &avisq; s/^\(\s*//; s/\s*\)$//; $_ }
-sub hlvis(@)  { local $_ = &hvis ; s/^\(\s*//; s/\s*\)$//; $_ }
-sub hlvisq(@) { local $_ = &hvisq; s/^\(\s*//; s/\s*\)$//; $_ }
-
-# TODO: Integrate this more deeply to avoid duplicating information when
-#       $v -> blessed and the object does *not* stringify.  Currently we get:
-#          "HASH<584:4b8>Foo::Bar=HASH(0x5555558fd4b8)"
-#       Stringifying objects are ok, e.g.
-#          "HASH<632:c38>(Math::BigInt)32"
-sub rvis(_)  { local $_ = &vis ; (ref($_[0]) ? &addrvis : "").$_ }
-sub rvisq(_) { local $_ = &visq; (ref($_[0]) ? &addrvis : "").$_ }
+sub vis(_)    { &__getobj_s ->_Vistype('')                      ->_Do; }
+sub visq(_)   { &__getobj_s ->_Vistype('')->Useqq(0)            ->_Do; }
+sub avis(@)   { &__getobj_a ->_Vistype('a')                     ->_Do; }
+sub avisq(@)  { &__getobj_a ->_Vistype('a')->Useqq(0)           ->_Do; }
+sub hvis(@)   { &__getobj_h ->_Vistype('h')                     ->_Do; }
+sub hvisq(@)  { &__getobj_h ->_Vistype('h')->Useqq(0)           ->_Do; }
+    # '?l' variants return a bare List without parenthesis/brackets
+sub alvis(@)  { &__getobj_a ->_Vistype('l')                     ->_Do; }
+sub alvisq(@) { &__getobj_a ->_Vistype('l')->Useqq(0)           ->_Do; }
+sub hlvis(@)  { &__getobj_h ->_Vistype('l')                     ->_Do; }
+sub hlvisq(@) { &__getobj_h ->_Vistype('l')->Useqq(0)           ->_Do; }
+    # 'o' variants show object internals
+sub viso(_)   { &__getobj_s ->_Vistype('')->Objects(0)          ->_Do; }
+sub visoq(_)  { &__getobj_s ->_Vistype('')->Objects(0)->Useqq(0)->_Do; }
+    # 'r*' variants prefix ref expansions with type<abbrevaddr>
+sub rvis(_)   { &__getobj_s ->_Vistype('r')                     ->_Do; }
+sub rvisq(_)  { &__getobj_s ->_Vistype('r')->Useqq(0)           ->_Do; }
+sub ravis(@)  { &__getobj_a ->_Vistype('ar')                    ->_Do; }
+sub ravisq(@) { &__getobj_a ->_Vistype('ar')->Useqq(0)          ->_Do; }
+sub rhvis(@)  { &__getobj_h ->_Vistype('hr')                    ->_Do; }
+sub rhvisq(@) { &__getobj_h ->_Vistype('hr')->Useqq(0)          ->_Do; }
 
 # Trampolines which replace the call frame with a call directly to the
 # interpolation code which uses $package DB to access the user's context.
@@ -368,6 +382,11 @@ sub ivis(_) { @_=(&__getobj,          shift,'i');goto &_Interpolate }
 sub ivisq(_){ @_=(&__getobj->Useqq(0),shift,'i');goto &_Interpolate }
 sub dvis(_) { @_=(&__spacedots_getobj,          shift,'d');goto &_Interpolate }
 sub dvisq(_){ @_=(&__getobj->Useqq(0),shift,'d');goto &_Interpolate }
+
+sub rivis(_) { @_=(&__getobj->_Vistype('r')          ,shift,'i');goto &_Interpolate }
+sub rivisq(_){ @_=(&__getobj->_Vistype('r')->Useqq(0),shift,'i');goto &_Interpolate }
+sub rdvis(_) { @_=(&__spacedots_getobj->_Vistype('r'),shift,'d');goto &_Interpolate }
+sub rdvisq(_){ @_=(&__getobj->_Vistype('r')->Useqq(0),shift,'d');goto &_Interpolate }
 
 ############# only internals follow ############
 
@@ -390,12 +409,15 @@ sub _get_terminal_width() {  # returns undef if unknowable
     local *_; # Try to avoid clobbering special filehandle "_"
     # This does not actualy work; https://github.com/Perl/perl5/issues/19142
 
-    my $fh = -t STDERR ? *STDERR : 
+    my $fh = -t STDERR ? *STDERR :
              -t STDOUT ? *STDOUT :
              -t STDIN  ? *STDIN  :
         do{my $fh; for("/dev/tty",'CONOUT$') { last if open $fh, $_ } $fh} ;
-    my $wmsg = ""; # Suppress hard-coded "didn't work" from Term::ReadKey
-                   #  or "stty: standard input: Not a tty" etc.
+    my $wmsg = ""; # Suppress a "didn't work" warning from Term::ReadKey.
+                   # On some platforms (different libc?) "stty" directly
+                   # outputs "stdin is not a tty" which we can not trap.
+                   # Probably this is a Term::Readkey bug where it should
+                   # redirect such messages to /dev/null...
     my ($width, $height) = do {
       local $SIG{'__WARN__'} = sub { $wmsg .= $_[0] };
       $fh ? Term::ReadKey::GetTerminalSize($fh) : ()
@@ -413,11 +435,13 @@ sub _set_default_Foldwidth() {
 }
 
 my $unique = refaddr \&vis;
-my $magic_noquotes_pfx = "<NQMagic$unique>";
+my $magic_noquotes_pfx   = "<NQMagic$unique>";
 my $magic_keepquotes_pfx = "<KQMagic$unique>";
+my $magic_addrvis        = "<AVMagic$unique>";
+my $magic_elide_next     = "<ENMagic$unique>";
 
 #---------------------------------------------------------------------------
-my ($maxstringwidth, $truncsuffix, $objects, $debug);
+my ($maxstringwidth, $truncsuffix, $objects, $vistype, $debug);
 
 sub _Do {
   oops unless @_ == 1;
@@ -426,8 +450,8 @@ sub _Do {
   local $_;
   &_SaveAndResetPunct;
 
-  ($maxstringwidth, $truncsuffix, $objects, $debug)
-    = @$self{qw/MaxStringwidth Truncsuffix Objects Debug/};
+  ($maxstringwidth, $truncsuffix, $objects, $vistype, $debug)
+    = @$self{qw/MaxStringwidth Truncsuffix Objects _Vistype Debug/};
 
   $maxstringwidth = 0 if ($maxstringwidth //= 0) >= INT_MAX;
   $truncsuffix //= "...";
@@ -436,7 +460,7 @@ sub _Do {
   my @orig_values = $self->dd->Values;
   croak "Exactly one item may be in Values" if @orig_values != 1;
   my $original = $orig_values[0];
-  btw "##ORIGINAL:",_dbvis($original) if $debug;
+  btw "##ORIGINAL=",u($original),"=",_dbvis($original) if $debug;
 
   my $modified = $self->visit($original); # see Data::Visitor
   btw "##MODIFIED (DD input):",_dbvis($modified) if $debug;
@@ -464,7 +488,7 @@ sub _Do {
   ($@, $?) = ($sAt, $sQ);
   $self->Pad($users_pad);
 
-  $our_result //= $self->_postprocess_DD_result($dd_result);
+  $our_result //= $self->_postprocess_DD_result($dd_result, $original);
 
   &_RestorePunct;
   $our_result;
@@ -520,10 +544,24 @@ sub visit_hash_key {
   return $item; # don't truncate or otherwise munge
 }
 
+sub _prefix_addrvis($$) {
+  my ($item, $original) = @_;
+  # Called only if enabled (by _Vistype containint 'r').
+  #
+  # Prefix (the formatted representation of) a ref with it's type 
+  # and abbreviated address.  This is done by wrapping the ref in
+  # a temporary [array] with the addrvis result, and unwrapping the
+  # Data::Dumper result in _postprocess_DD_result().
+  $item = [ $magic_addrvis.addrvis($original), $item, $magic_elide_next, ];
+  btw '@@@addrvis prefixed item:',_dbvis2($item) if $debug;
+  $item
+}
+
 sub visit_object {
   my $self = shift;
   say "!V object ",_dbravis2(@_) if $debug;
   my $item = shift;
+  my $original = $item;
   my $overload_depth;
   CHECK: {
     if (my $class = blessed($item)) {
@@ -591,23 +629,30 @@ btw '@@@repl (overload...)' if $debug;
           redo CHECK;
         }
       }
-      # No overloaded operator (that we care about); just stringify the ref
+      # No overloaded operator (that we care about); always use addrvis(obj)
       # except for refs to a regex which Data::Dumper formats nicely by itself.
       unless ($class eq 'Regexp') {
 btw '@@@repl (no overload repl, not Regexp)' if $debug;
         #$item = "$item";  # will show with "quotes"
-        $item = "${magic_noquotes_pfx}$item"; # show without "quotes"
-        redo CHECK;
+        #$item = ${magic_noquotes_pfx}.$item; # omit "quotes"
+        $item = ${magic_noquotes_pfx}.addrvis($item);
       }
     }
   }#CHECK
+  $item = _prefix_addrvis($item, $original) if index($vistype,"r") >= 0;
   $item
 }#visit_object
 
 sub visit_ref {
   my ($self, $item) = @_;
   say "!V ref  ref()=",ref($item)," item=",_dbravis2($item) if $debug;
-  $self->SUPER::visit_ref($item);
+  my $original = $item;
+  # First descend into the structure, probably returning a clone
+  $item = $self->SUPER::visit_ref($item);
+  # If the ref wasn't replaced by a non-ref, prefix it with the
+  # original address if requested.
+  $item = _prefix_addrvis($item, $original) if index($vistype,"r") >= 0;
+  $item
 }
 
 sub visit_glob {
@@ -682,26 +727,6 @@ btw '##         orig=",addrvis($orig_itemref)," -> ",_dbvis($$orig_itemref)' if 
       untie $$cloned_itemref;
       $$cloned_itemref = $copy; # n.b. $copy might be a ref to a tied variable
       oops if tied($$cloned_itemref);
-    }
-
-    if (defined(my $repl = $self->_replacement($$orig_itemref))) {
-      btw '##pp Item REPLACED by ",_dbvis($repl)' if $debug;
-      # If the item is $#array then the following assignment will try to
-      # change the length of 'array', but blow up because the value is a string.
-      # I suspect similar things could happen with true read-only values
-      # but it appears that Clone::clone makes them writeable.
-      # Anyway, use eval and just leave it as-is if the assignment fails.
-      #
-      eval {
-        circular_off $$cloned_itemref; # allow garbage collecting the clone
-        unbless $$cloned_itemref;      # avoid duplicate DESTROY calls
-        $$cloned_itemref = $repl
-      };
-      if ($@) {
-        btw '##pp Item *can not* be REPLACED by ",_dbvis($repl)," ($@)' if $debug;
-        return;
-      }
-      return
     }
 
     my $rt = reftype($$cloned_itemref) // ""; # "" if item is not a ref
@@ -881,7 +906,7 @@ my $anyvname_re =
 
 my $anyvname_or_refexpr_re = qr/ ${anyvname_re} | ${curlies_re} /x;
 
-sub __unmagic() {  # edits $_
+sub __unmagic_atom() {  # edits $_
   s/(['"])([^'"]*?)
     (?:\Q$magic_noquotes_pfx\E)
     (.*?)(\1)/$2$3/xgs;
@@ -959,7 +984,7 @@ use constant {
 use constant _WRAP_STYLE => (_WRAP_ALLHASH);
 
 sub _postprocess_DD_result {
-  (my $self, local $_) = @_;
+  (my $self, local $_, my $original) = @_;
   no warnings 'recursion';
   my ($debug, $vistype, $foldwidth, $foldwidth1)
     = @$self{qw/Debug _Vistype Foldwidth Foldwidth1/};
@@ -985,7 +1010,7 @@ sub _postprocess_DD_result {
     (local $_, my $mode) = @_;
     $mode //= "";
 
-    __unmagic ;
+    __unmagic_atom ;
     __unesc_unicode          if $unesc_unicode;
     __subst_controlpics      if $controlpics;
     __subst_spacedots        if $spacedots;
@@ -1077,8 +1102,7 @@ sub _postprocess_DD_result {
   #
   # 4/25/2023: Added the (non-public) config constant _WRAP_STYLE;
   #
-  # _WRAP_STYLE == _WRAP_ALWAYS:
-  #
+  # (_WRAP_STYLE == _WRAP_ALWAYS):
   # If folding is necessary, then *every* member of the folded block
   # appears on a separate line, so members all vertically align.
   #
@@ -1090,8 +1114,7 @@ sub _postprocess_DD_result {
   # When folding is necessary, every member appears on a separate
   # line if ANY of them will not fit on a single line; however if
   # they all fit individually, then shorter members will be run
-  # together on the same line.  #
-  # For example:
+  # together on the same line.  For example:
   #
   #    [aaa,bbb,[ccc,ddd,[eee,fff,hhhhhhhhhhhhhhhhhhhhh,{key => value}]]]
   #
@@ -1255,6 +1278,16 @@ sub _postprocess_DD_result {
     }
   }#expand_children
 
+  # Remove the magic wrapper created by _prefix_addrvis().  The original $ref 
+  # was replaced by 
+  #
+  #    [ $magic_addrvis.addrvis($ref), $ref, $magic_elide_next, ];
+  #
+  # Data::Dumper formatted the magic* items as "quoted strings"
+  #
+  s/\[\s*(["'])\Q$magic_addrvis\E(.*?)\1,\s*/$2/gs;
+  s/,\s*(["'])\Q$magic_elide_next\E\1,?\s*\]//gs
+    && $debug && btw "Unwrapped addrvis:",_dbvis($_);
 
   while ((pos()//0) < length) {
        if (/\G[\\\*\!]/gc)                       { atom($&, "prepend_to_next") }
@@ -1262,6 +1295,10 @@ sub _postprocess_DD_result {
     elsif (/\G"(?:[^"\\]++|\\.)*+"/gsc)          { atom($&) } # "quoted"
     elsif (/\G'(?:[^'\\]++|\\.)*+'/gsc)          { atom($&) } # 'quoted'
     elsif (m(\Gqr/(?:[^\\\/]++|\\.)*+/[a-z]*)gsc){ atom($&) } # Regexp
+    elsif (/\G[A-Za-z][:\w]*\<\d+:[\da-fA-F]+\>/gsc) { 
+      # addrvis() result e.g. My::Package<decimal:hex>
+      atom($&, "prepend_to_next");
+    }
 
     # With Deparse(1) the body has arbitrary Perl code, which we can't parse
     elsif (/\Gsub\s*${curlies_re}/gc)            { atom($&) } # sub{...}
@@ -1294,15 +1331,18 @@ sub _postprocess_DD_result {
   $level = 0;
   expand_children($top);
 
-  if (($vistype//'s') eq 's') {
-  }
-  elsif ($vistype eq 'a') {
+  if (index($vistype,'a') >= 0) {
+    # show [...] as (val1,val2,...) array initializer
     $outstr =~ s/\A\[/(/ && $outstr =~ s/\]\z/)/s or oops;
   }
-  elsif ($vistype eq 'h') {
+  elsif (index($vistype,'h') >= 0) {
+    # show {...} as (key => val, ...) hash initializer
     $outstr =~ s/\A\{/(/ && $outstr =~ s/\}\z/)/s or oops;
   }
-  else { oops }
+  elsif (index($vistype,'l') >= 0) {
+    # show as a bare list without brackets
+    $outstr =~ s/\A[\[\{]// && $outstr =~ s/[\]\}]\z//s or oops;
+  }
 
   # Insert user-specified padding after each embedded newline
   if ($pad) {
@@ -1555,7 +1595,7 @@ Data::Dumper::Interp - interpolate Data::Dumper output into strings for human co
   say hvis %hash;    #prints (abc => [1,2,3,4,5], def => undef)
 
   # Format a reference with abbreviated referent address
-  say rvis $ref;   #prints HASH<457:1c9>{abc => [1,2,3,4,5], ...}
+  say rvis $href;    #prints HASH<457:1c9>{abc => [1,2,3,4,5], ...}
 
   # Just abbreviate a referent address or arbitrary number
   say addrvis refaddr($ref);  # 457:1c9
@@ -1660,8 +1700,6 @@ brevity of typing is more highly prized than beautiful output.
 
 =head2 vis optSCALAREXPR
 
-=head2 rvis optSCALAREXPR
-
 =head2 avis LIST
 
 =head2 hvis EVENLIST
@@ -1669,34 +1707,18 @@ brevity of typing is more highly prized than beautiful output.
 C<vis> formats a single scalar ($_ if no argument is given)
 and returns the resulting string.
 
-C<rvis> is the same as C<vis> except if the argument is a reference
-then the result is prefixed by its abbreviated address (see C<addrvis>).
-
 C<avis> formats an array (or any list) as comma-separated values in parenthesis.
 
 C<hvis> formats key => value pairs in parenthesis.
 
-=head2 alvis LIST
+=head2 B<< I<Variations> >>
 
-=head2 hlvis EVENLIST
+=head3 B<alvis, hlvis>
 
-The "B<l>" variants return a bare list without the enclosing parenthesis.
+The "B<l>" variants return a bare list of array or hash members
+without the enclosing parenthesis.
 
-=head2 ivisq 'string to be interpolated'
-
-=head2 dvisq 'string to be interpolated'
-
-=head2 visq optSCALAREXPR
-
-=head2 rvisq optSCALAREXPR
-
-=head2 avisq LIST
-
-=head2 alvisq LIST
-
-=head2 hvisq EVENLIST
-
-=head2 hlvisq EVENLIST
+=head3 B<ivisq dvisq visq avisq hvisq alvisq hlvisq>
 
 The "B<q>" variants show strings 'single quoted' if possible.
 
@@ -1704,24 +1726,35 @@ Internally, Data::Dumper is called with C<Useqq(0)>, but depending on
 the version of Data::Dumper the result may be "double quoted" anyway
 if wide characters are present.
 
+=head3 B<rivis rdvis rvis ravis rhvis rivisq rdvisq rvisq ravisq rhvisq>
+
+The "B<r>" variants show the
+I<< type<abbreviated refaddr> >> before refs (see I<addrvis>).  
+For example B<rvis([1..3])> returns something like "ARRAYZ<><457:1c9>[1,2,3]".
+
+=head3 B<viso visoq>
+
+The "B<o>" variants show the internals of objects, the same as if
+C<$Objects> is set to 0.  By default object internals are never shown,
+see I<Objects(BOOL)>.
+
 =head2 addrvis REF
 
 =head2 addrvis NUMBER
 
-Abbreviate object addresses, showing only the last few digits
-in both decimal and hex.
+These return a string showing the address in both decimal and hexadecimal, 
+but abbreviated to only the last few digits.
 
 The number of digits increases over time if necessary to keep new results
 unambiguous.
 
-The result is like I<< "E<lt>457:1c9E<gt>" >> for plain numbers,
-I<< "HASHE<lt>457:1c9E<gt>" >> for unblessed references,
-I<< "Package::NameE<lt>457:1c9E<gt>" >> for blessed refs,
-or I<"undef"> if the argument is undefined.
+For REFs, the result is like I<< "HASHE<lt>457:1c9E<gt>" >> 
+or, for blessed objects, I<< "Package::NameE<lt>457:1c9E<gt>" >>.
 
-B<rvis> is essentially the same as
+If the argument is a plain number, just the abbreviated address
+like I<< "E<lt>457:1c9E<gt>" >> is returned.
 
-  addrvis(REF).vis(REF)   # e.g. "HASH<457:1c9>{ key=>value, ... }"
+I<"undef"> is returned if the argument is undefined.
 
 =head1 OBJECT-ORIENTED INTERFACES
 
@@ -1778,18 +1811,18 @@ Defaults to the terminal width at the time of first use.
 =head2 Objects([ list of classnames ])
 
 A I<false> value disables special handling of objects
-and internals are shown as with Data::Dumper.
+(that is, blessed things) and internals are shown as with Data::Dumper.
 
-A "1" (the default) enables for all objects, otherwise only
-for the specified class name(s) [or derived classes].
+A "1" (the default) enables for all objects,
+otherwise only for the specified class name(s) [or derived classes].
 
 When enabled, object internals are never shown.
-If the stringification ('""') operator,
-or array-, hash-, scalar-, or glob- deref operators are overloaded,
-then the first overloaded operator found will be evaluated and the
+If the object overloads the stringification ('""') operator,
+or array-, hash-, scalar-, or glob- deref operators,
+then the first overloaded operator found will be evaluated,
 object replaced by the result, and the check repeated; otherwise
-the I<ref> is stringified in the usual way, so something
-like "Foo::Bar=HASH(0xabcd1234)" appears.
+only the class and abbreviated address are shown as with C<addrvis>
+e.g. "Foo::Bar<392:0f0>".
 
 Beginning with version 5.000 the B<deprecated> C<Overloads> method
 is an alias for C<Objects>.

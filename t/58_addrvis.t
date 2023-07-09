@@ -50,7 +50,7 @@ sub check_rvis($) {
   }
   $desc .= " [line ".(caller(0))[2]."]";
   my $rvis_result = rvis($item);
-  ok( $rvis_result eq $exp, $desc);
+  is($rvis_result, $exp, $desc);
 }
 check_rvis($href);
 check_rvis($aref);

@@ -477,6 +477,11 @@ sub fmt_codestring($;$) { # returns list of lines
   my $i; map{ sprintf "%s%2d: %s\n", $prefix,++$i,$_ } (split /\n/,$_[0]);
 }
 
+# These wrappers add the caller's line number to the test description
+# so they show when successful tests log their name.
+# This is only visible with using "perl -Ilib t/xxx.t"
+# not with 'prove -l' and so mostly pointless!
+
 sub t_ok($;$) {
   my ($isok, $test_label) = @_;
   my $lno = (caller)[2];

@@ -1,4 +1,8 @@
 (Recent) Revision history for Perl extension Data-Dumper-Interp
 
+5.029 - Implement ravis,ravisq,rhvis,rhvisq which prefix object and
+        non-blessed container contents with type<abbrevatedaddress>
+        ala addrvis().
+
 5.025 - qsh() now quotes for cmd.com on windows (instead of /bin/sh)
 
