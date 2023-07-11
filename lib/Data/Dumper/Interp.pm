@@ -422,14 +422,14 @@ sub _get_terminal_width() {  # returns undef if unknowable
       local $SIG{'__WARN__'} = sub { $wmsg .= $_[0] };
       $fh ? Term::ReadKey::GetTerminalSize($fh) : ()
     };
-    return $width; # possibly undef
+    return $width; # possibly undef (sometimes seems to be zero ?!?)
   }
 }
 
 sub _set_default_Foldwidth() {
   my $self = shift;
   _SaveAndResetPunct();
-  $Foldwidth = _get_terminal_width // 80;
+  $Foldwidth = _get_terminal_width || 80;
   _RestorePunct();
   undef $Foldwidth1;
 }
