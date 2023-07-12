@@ -41,9 +41,10 @@ $SIG{__DIE__} = sub {
       }
     }
     if ($via_carp) {
-      fail(@_);
+      fail("croak/confess caught", @_);
     } else {
-      fail(Carp::longmess(@_));
+      my ($fn, $lno) = (caller(0))[1,2];
+      fail("croak/confess caught at ${fn}:$lno", Carp::longmess(@_));
     }
     bail_out("die trapped");
   }
@@ -54,7 +55,7 @@ confess("Non-zero CHILD_ERROR ($?)") if $? != 0;
 # This script was written before the author knew anything about standard
 # Perl test-harness tools.  So it is a big monolithic thing.
 
-use Data::Dumper::Interp;
+use Data::Dumper::Interp qw/:all/;
 
 sub visFoldwidth() {
   "Data::Dumper::Interp::Foldwidth=".u($Data::Dumper::Interp::Foldwidth)
@@ -82,8 +83,8 @@ confess("Non-zero initial CHILD_ERROR ($?)") if $? != 0;
 #    [ 'avis($_[1])',             '(_Q_)' ],
 #    [ 'avisq($_[1])',            '(_q_)' ],
 #    #currently broken due to $VAR problem: [ 'avisq($_[1], $_[1])',     '(_q_, _q_)' ],
-#    [ 'alvis($_[1])',             '_Q_' ],
-#    [ 'alvisq($_[1])',            '_q_' ],
+#    [ 'avisl($_[1])',             '_Q_' ],
+#    [ 'avislq($_[1])',            '_q_' ],
 #    [ 'ivis(\'$_[1]\')',         '_Q_' ],
 #    [ 'ivis(\'foo$_[1]\')',      'foo_Q_' ],
 #    [ 'ivis(\'foo$\'."_[1]")',   'foo_Q_' ],
@@ -121,8 +122,8 @@ sub mychecklit(&$$) {
     [ 'avis($_[1])',             '(_Q_)' ],
     [ 'avisq($_[1])',            '(_q_)' ],
     #currently broken due to $VAR problem: [ 'avisq($_[1], $_[1])',     '(_q_, _q_)' ],
-    [ 'alvis($_[1])',             '_Q_' ],
-    [ 'alvisq($_[1])',            '_q_' ],
+    [ 'avisl($_[1])',             '_Q_' ],
+    [ 'avislq($_[1])',            '_q_' ],
     [ 'ivis(\'$_[1]\')',         '_Q_' ],
     [ 'ivis(\'foo$_[1]\')',      'foo_Q_' ],
     [ 'ivis(\'foo$\'."_[1]")',   'foo_Q_' ],
@@ -163,7 +164,7 @@ foreach (
 {
   my ($confname, @values) = @$_;
   foreach my $value (@values) {
-    foreach my $base (qw(vis avis hvis alvis hlvis dvis ivis)) {
+    foreach my $base (qw(vis avis hvis avisl hvisl dvis ivis)) {
       foreach my $q ("", "q") {
         my $codestr = $base . $q . "(42";
          $codestr .= ", 43" if $base =~ /^[ahl]/;
@@ -293,10 +294,10 @@ if ($^O eq "MSWin32") {
 { my $code = 'vis'; mycheck $code, "\"${_}\"", eval $code; }
 { my $code = 'avis($_,1,2,3)'; mycheck $code, "(\"${_}\",1,2,3)", eval $code; }
 { my $code = 'hvis("foo",$_)'; mycheck $code, "(foo => \"${_}\")", eval $code; }
-{ my $code = 'hlvis("foo",$_)'; mycheck $code, "foo => \"${_}\"", eval $code; }
+{ my $code = 'hvisl("foo",$_)'; mycheck $code, "foo => \"${_}\"", eval $code; }
 { my $code = 'avis(@_)'; mycheck $code, '()', eval $code; }
 { my $code = 'hvis(@_)'; mycheck $code, '()', eval $code; }
-{ my $code = 'hlvis(@_)'; mycheck $code, '', eval $code; }
+{ my $code = 'hvisl(@_)'; mycheck $code, '', eval $code; }
 { my $code = 'avis(undef)'; mycheck $code, "(undef)", eval $code; }
 { my $code = 'hvis("foo",undef)'; mycheck $code, "(foo => undef)", eval $code; }
 { my $code = 'vis(undef)'; mycheck $code, "undef", eval $code; }
@@ -479,9 +480,12 @@ EOF
 }
 
 # There was a bug for s/dvis called direct from outer scope, so don't use eval:
-#WAS BUG HERE: On some older platforms qr/.../ can visualize to a different,
-#longer representation, so forcing wrap to be the same on all platforms.
-my $SS = ($Data::Dumper::Interp::Useqq//"") =~ /dots/ ? "·" : " "; # spacedots in effect?
+#
+# Another bug was here: On some older platforms qr/.../ can visualize to a 
+# different, longer representation, so forcing wrap to be the same everywhere
+#
+my $SS = do{ my $x=" "; dvis('$x') =~ /x="(.)"/ or die; $1 }; # spacedots?
+
 mycheck
   'global dvis %toplex_h',
 q!%toplex_h=(
@@ -657,8 +661,8 @@ sub get_closure(;$) {
      #[__LINE__, q($byte_str\n), qq(byte_str=\"\\n\\x{B}\\f\\r\\x{E}\\x{F}\\x{10}\\x{11}\\x{12}\\x{13}\\x{14}\\x{15}\\x{16}\\x{17}\\x{18}\\x{19}\\x{1A}\\e\\x{1C}\\x{1D}\\x{1E}\"\n) ],
     )),
 
-    [__LINE__, q($flex\n), qq(flex=\"Lexical in sub f\"\n) ],
-    [__LINE__, q($$flex_ref\n), qq(\$\$flex_ref=\"Lexical in sub f\"\n) ],
+    [__LINE__, q($flex\n), qq(flex=\"Lexical${SS}in${SS}sub${SS}f\"\n) ],
+    [__LINE__, q($$flex_ref\n), qq(\$\$flex_ref=\"Lexical${SS}in${SS}sub${SS}f\"\n) ],
 
     [__LINE__, q($_ $ARG\n), qq(\$_=\"GroupA.GroupB\" ARG=\"GroupA.GroupB\"\n) ],
     [__LINE__, q($a\n), qq(a=\"global-a\"\n) ],

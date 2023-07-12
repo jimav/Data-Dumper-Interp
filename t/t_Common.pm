@@ -123,9 +123,9 @@ sub import {
   require Guard;
   Guard->import::into($target, qw(scope_guard guard));
 
+  use Data::Dumper::Interp 5.030 (); # 5.030 has new rvis etc.
   unless (Cwd::abs_path(__FILE__) =~ /Data-Dumper-Interp/) {
     # unless we are testing this
-    require Data::Dumper::Interp;
     Data::Dumper::Interp->import::into($target);
     $Data::Dumper::Interp::Useqq = 'unicode'; # omit 'controlpic' to get \t etc.
   }

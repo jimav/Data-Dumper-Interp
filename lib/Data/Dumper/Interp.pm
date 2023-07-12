@@ -3,11 +3,12 @@
 # The author, Jim Avera (jim.avera at gmail) has waived all copyright and
 # related or neighboring rights.  Attribution is requested but is not required.
 
-##FIXME: Blessed structures are not formatted because we treat bless(...) as an atom
+##FIXME: Refaddr(1) has no effect inside Blessed structures
 
 use strict; use warnings FATAL => 'all'; use utf8;
-#use 5.010;  # say, state
-use 5.011;  # cpantester gets warning that 5.11 is the minimum acceptable
+#use 5.010; # say, state
+#use 5.011; # cpantester gets warning that 5.11 is the minimum acceptable
+#use 5.014; # /r for non-destructive substitution
 use 5.018;  # lexical_subs
 use feature qw(say state lexical_subs current_sub);
 use feature 'lexical_subs';
@@ -30,42 +31,124 @@ package
 package Data::Dumper::Interp;
 
 use Moose;
-no warnings "experimental::lexical_subs"; # un-do Moose forcing these on!!
 
-extends qw(Data::Visitor);
+extends 'Data::Visitor' => { -version => 0.32 },
+        'Exporter'      => { -version => 5.57 },
+        ;
+
+no warnings "experimental::lexical_subs"; # un-do Moose forcing these on!!
 
 use Data::Dumper ();
 use Carp;
 use POSIX qw(INT_MAX);
 use Scalar::Util qw(blessed reftype refaddr looks_like_number weaken);
-use List::Util 1.33 qw(min max first none all any sum0);
+use List::Util 1.33 qw(min max first none all any sum0 uniqstr);
+use Data::Structure::Util qw/circular_off/;
 use Regexp::Common qw/RE_balanced/;
 use Term::ReadKey ();
 use overload ();
 
-use Exporter 'import';
+############################ Exports #######################################
+# Short-hand functions/methods are generated on demand (i.e. if imported or
+# called as a method) based on a naming convention.
+############################################################################
+
 our @EXPORT    = qw( visnew
-
-                     vis visq avis avisq hvis hvisq
-                     alvis alvisq hlvis hlvisq
-                     viso visoq
-                     rvis rvisq ravis ravisq rhvis rhvisq
-
-                     ivis ivisq dvis dvisq
-                     addrvis
+                     vis avis hvis ivis dvis
+                     visq avisq hvisq ivisq dvisq
+                     rvis rvisq
+                     addrvis addrvisl
                      u quotekey qsh qshlist qshpath
                    );
 
 our @EXPORT_OK = qw($Debug $MaxStringwidth $Truncsuffix $Objects $Foldwidth
                     $Useqq $Quotekeys $Sortkeys
-                    $Maxdepth $Maxrecurse $Deparse);
+                    $Maxdepth $Maxrecurse $Deparse $Deepcopy);
 
-sub addrvis(_); # forward
-#---------------------------------------------------------------------------
+our %EXPORT_TAGS = (
+  null => [],
+);
+
+sub _generate_sub($;$); # forward
+
+our $AUTOLOAD_debug;
+
+sub import {
+  my $class = shift;
+  my @args = @_;
+
+  my $exporting_default = (@args==0 or grep{ /:DEFAULT/ } @args);
+
+  our $Debug;
+  local $Debug = $Debug;
+  if (my $tag = first{ /^:debug/i } @args) {
+    @args = grep{ ! /^:debug/i } @args;
+    my $level = ($tag =~ /=(\d+)/ ? $1 : 1);
+    $AUTOLOAD_debug = $Debug = $level; # show generated code
+  }
+
+  if (grep{ /^:all$/i } @args) {
+    @args = grep{ ! /^:all$/i } @args;
+    # Generate all modifiers combinations as suffixes in alphabetical order.
+    my %already = map{$_ => 1} @args;
+    push @args, ":DEFAULT" unless $already{':DEFAULT'};
+    for my $v1 (qw/avis hvis vis ivis dvis/) { # avisl hvisl ?
+      for my $v2 ('1', '2', "") {
+        for my $v3 ('l', "") {
+          next if $v3 && $v1 !~ /^[ah]/; # 'l' only with avis or hvis
+          for my $v4 ('o', "") {
+            for my $v5 ('q', "") {
+              for my $v6 ('r', "") {
+                my $subname = $v1.$v2.$v3.$v4.$v5.$v6;
+                next if $already{$subname}++;
+                push @args, $subname;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  foreach my $subname (@args, ($exporting_default ? @EXPORT : ())) {
+    next unless $subname =~ /^[a-zA-Z]/a;  # skip :tag or $var
+    push @EXPORT_OK, $subname;
+    no strict 'refs';
+    if (defined(*$subname{CODE})) {
+      warn "# $subname ALREADY DEFINED\n" if ($Debug//0) > 1;
+    } else {
+      # Only generate a 'forward' stub to allow prototype checks.
+      # Subs actually called will be defined via AUTOLOAD
+      _generate_sub($subname, 1);
+    }
+  }
+
+  @args = (':null') if @_ && !@args;
+
+  warn "Passing to Exporter::import ",&_dbavis(@args),"\n"
+    if $Debug;
+
+  __PACKAGE__->export_to_level(1, $class, @args);
+}
+
+sub AUTOLOAD {  # invoked on call to undefined *method*
+  our $AUTOLOAD;
+  # TODO: oops un
+  our $Debug;
+  local $Debug = $AUTOLOAD_debug;
+  carp "AUTOLOAD $AUTOLOAD" if $Debug;
+  _generate_sub($AUTOLOAD);
+  no strict 'refs';
+  goto &$AUTOLOAD;
+}
+#sub DESTROY {}  #unnecessary: No D::D::Interp objects are ever instantiated
+
+############################################################################
 # Internal debug-message utilities
 
 sub oops(@) { @_=("\n".__PACKAGE__." oops:\n",@_,"\n"); goto &Carp::confess }
-sub btw(@) { local $_=join("",@_); s/\n\z//s; say( (caller(0))[2].": $_" ); }
+sub btwN($@) { my $N=shift; local $_=join("",@_); s/\n\z//s; printf "%4d: %s\n",(caller($N))[2],$_; }
+sub btw(@) { unshift @_,0; goto &btwN }
 
 sub __chop_loc($) {  # remove "at ..." from an exception message
   (local $_ = shift) =~ s/ at \(eval[^\)]*\) line \d+[^\n]*\n?\z//s;
@@ -73,18 +156,20 @@ sub __chop_loc($) {  # remove "at ..." from an exception message
 }
 sub _tf($) { $_[0] ? "T" : "F" }
 sub _showfalse(_) { $_[0] ? $_[0] : 0 }
-sub _dbvisnew {
+sub _dbvisnew($) {
   my $v = shift;
-  Data::Dumper->new([$v])->Terse(1)->Indent(0)->Quotekeys(0)
+  Data::Dumper->new([$v])->Terse(1)->Indent(0)->Quotekeys(0)->Useqq(1)
               #->Useperl(1)
               ###->Sortkeys(\&__sortkeys)->Pair("=>")
 }
 sub _dbvis(_) {chomp(my $s=_dbvisnew(shift)->Useqq(1)->Dump); $s }
 sub _dbvisq(_){chomp(my $s=_dbvisnew(shift)->Useqq(0)->Dump); $s }
+sub _dbvis1(_){chomp(my $s=_dbvisnew(shift)->Maxdepth(1)->Useqq(1)->Dump); $s }
 sub _dbvis2(_){chomp(my $s=_dbvisnew(shift)->Maxdepth(3)->Useqq(1)->Dump); $s }
 sub _dbavis(@){ "(" . join(", ", map{_dbvis} @_) . ")" }
-sub _dbrvis(_) { (ref($_[0]) ? addrvis($_[0]) : "")._dbvis($_[0])  }
-sub _dbrvis2(_){ (ref($_[0]) ? addrvis($_[0]) : "")._dbvis2($_[0]) }
+sub _dbavis2(@){ "(" . join(", ", map{_dbvis2} @_) . ")" }
+sub _dbrvis(_) { (ref($_[0]) ? addrvis(refaddr $_[0]) : "")._dbvis($_[0])  }
+sub _dbrvis2(_){ (ref($_[0]) ? addrvis(refaddr $_[0]) : "")._dbvis2($_[0]) }
 sub _dbravis2(@){ "(" . join(", ", map{_dbrvis2} @_) . ")" }
 sub _dbshow(_) {
   my $v = shift;
@@ -109,19 +194,21 @@ sub _dbstrposn($$) {
   "posn=$posn shown at '(<<HERE)':"
     . substr($visible, 0, $posn+1)."(<<HERE)".substr($visible,$posn+1)
 }
-#---------------------------------------------------------------------------
+############################################################################
+
 
 #################### Configuration Globals #################
 
 our ($Debug, $MaxStringwidth, $Truncsuffix, $Objects,
-     $Foldwidth, $Foldwidth1,
+     $Refaddr, $Foldwidth, $Foldwidth1,
      $Useqq, $Quotekeys, $Sortkeys,
-     $Maxdepth, $Maxrecurse, $Deparse);
+     $Maxdepth, $Maxrecurse, $Deparse, $Deepcopy);
 
 $Debug          = 0            unless defined $Debug;
 $MaxStringwidth = 0            unless defined $MaxStringwidth;
 $Truncsuffix    = "..."        unless defined $Truncsuffix;
 $Objects        = 1            unless defined $Objects;
+$Refaddr        = 0            unless defined $Refaddr;
 $Foldwidth      = undef        unless defined $Foldwidth;  # undef auto-detects
 $Foldwidth1     = undef        unless defined $Foldwidth1; # override for 1st
 
@@ -135,18 +222,13 @@ $Sortkeys       = \&__sortkeys unless defined $Sortkeys;
 $Maxdepth       = $Data::Dumper::Maxdepth   unless defined $Maxdepth;
 $Maxrecurse     = $Data::Dumper::Maxrecurse unless defined $Maxrecurse;
 $Deparse        = 0            unless defined $Deparse;
+$Deepcopy       = 0            unless defined $Deepcopy;
 
 #################### Methods #################
-
-# Other Data::Dumper options may be accessed via inherited methods from D::D.
-
-# OK, trying this fully Moosified.  If it is too slow then I'll go back
-# to using a separate Moose ...::Mapper class only used to clone/preprocess.
 
 has dd => (
   is => 'ro',
   lazy => 1,
-  isa => 'Data::Dumper',
   default => sub{
     my $self = shift;
     Data::Dumper->new([],[])
@@ -159,9 +241,11 @@ has dd => (
       ->Maxdepth($Maxdepth)
       ->Maxrecurse($Maxrecurse)
       ->Deparse($Deparse)
+      ->Deepcopy($Deepcopy)
   },
+  # This generates pass-through methods which call the dd object
   handles => [qw/Values Useqq Quotekeys Trailingcomma Pad Varname Quotekeys
-                 Maxdepth Maxrecurse Useperl Sortkeys Deparse
+                 Maxdepth Maxrecurse Useperl Sortkeys Deparse Deepcopy
                 /],
 );
 
@@ -170,30 +254,22 @@ has Debug          => (is=>'rw', default => sub{ $Debug                 });
 has MaxStringwidth => (is=>'rw', default => sub{ $MaxStringwidth        });
 has Truncsuffix    => (is=>'rw', default => sub{ $Truncsuffix           });
 has Objects        => (is=>'rw', default => sub{ $Objects               });
+has Refaddr        => (is=>'rw', default => sub{ $Refaddr               });
 has Foldwidth      => (is=>'rw', default => sub{
                          $Foldwidth // do{
-                           $_[0]->_set_default_Foldwidth();
+                           _set_default_Foldwidth();
                            $Foldwidth
                          }
                        });
 has Foldwidth1     => (is=>'rw', default => sub{ $Foldwidth1            });
-
-sub _Vistype {
-  my ($s, $v) = @_;
-  # Replace anything other than 'r' (the addrvis-prefix flag).
-  # This is so when rdvis() et al. reuses the object but we don't
-  # loose 'r' flag after the first interpolcation.
-  @_ >= 2 ? (($s->{_Vistype} = (index($s->{_Vistype}//"",'r')>=0 ? 'r':'').$v),
-             return $s)
-          : $s->{_Vistype}
-}
+has _Listform      => (is=>'rw');
 
 # Make "setters" return the outer object $self
 around       [qw/Values Useqq Quotekeys Trailingcomma Pad Varname Quotekeys
-                 Maxdepth Maxrecurse Useperl Sortkeys Deparse
+                 Maxdepth Maxrecurse Useperl Sortkeys Deparse Deepcopy
 
-                 Debug MaxStringwidth Truncsuffix Objects
-                 Foldwidth Foldwidth1 _Vistype
+                 Debug MaxStringwidth Truncsuffix Objects Refaddr
+                 Foldwidth Foldwidth1 _Listform
                 /] => sub{
   my $orig = shift;
   my $self = shift;
@@ -213,12 +289,12 @@ around       [qw/Values Useqq Quotekeys Trailingcomma Pad Varname Quotekeys
 # The arg can be a numeric address or a ref from which the addr is taken.
 # If a ref the result is REFTYPEorOBJTYPE<dec:hex> otherwise just <dec:hex>
 our $addrvis_ndigits = 3;
-our $addrvis_a2abv   = {}; # address => abbreviated digits
-our $addrvis_abbrevs = {}; # abbreviated digits => undef
+our $addrvis_seen    = {};   # full (decimal) address => undef
+our $addrvis_dec_abbrs = {}; # abbreviated decimal digits => undef
 sub addrvis_forget(;$) {
-  $addrvis_ndigits = $_[0] || 3;
-  $addrvis_a2abv   = {};
-  $addrvis_abbrevs = {};
+  $addrvis_ndigits   = $_[0] || 3;
+  $addrvis_seen      = {};
+  $addrvis_dec_abbrs = {};
 }
 sub addrvis(_) {
   my $arg = shift // return("undef");
@@ -230,28 +306,28 @@ sub addrvis(_) {
     carp("addrvis arg '$arg' is neither a ref or a number\n");
     return ""
   }
-
   my sub abbr_hex($) {
        substr(sprintf("%0*x", $addrvis_ndigits, $_[0]), -$addrvis_ndigits) }
   my sub abbr_dec($) {
        substr(sprintf("%0*d", $addrvis_ndigits, $_[0]), -$addrvis_ndigits) }
 
-  if (! exists $addrvis_a2abv->{$addr}) {
-    my $abbrev = abbr_dec($addr);
-    while (exists $addrvis_abbrevs->{$abbrev}) {
+  if (! exists $addrvis_seen->{$addr}) {
+    my $dec_abbr = abbr_dec($addr);
+    while (exists $addrvis_dec_abbrs->{$dec_abbr}) {
       ++$addrvis_ndigits;
-      $addrvis_abbrevs = {};
-      for my $old_a (keys %$addrvis_a2abv) {
-        my $new_abbrev = abbr_dec($old_a);
-        $addrvis_a2abv->{$old_a} = $new_abbrev;
-        $addrvis_abbrevs->{$new_abbrev} = undef;
-      }
-      $abbrev = abbr_dec($addr);
+      %$addrvis_dec_abbrs = map{ (abbr_dec($_) => undef) } keys %$addrvis_seen;
+      $dec_abbr = abbr_dec($addr);
     }
-    $addrvis_a2abv->{$addr} = $abbrev;
-    $addrvis_abbrevs->{$abbrev} = undef;
+    $addrvis_dec_abbrs->{$dec_abbr} = undef;
+    $addrvis_seen->{$addr} = undef;
   }
+  #$refstr ne "" ? $refstr.'<'.abbr_dec($addr).':'.abbr_hex($addr).'>'
+  #              : abbr_dec($addr).':'.abbr_hex($addr)
   $refstr.'<'.abbr_dec($addr).':'.abbr_hex($addr).'>'
+}
+sub addrvisl(_) {
+  # Return bare "hex:dec" or "Typename hex:dec"
+  &addrvis =~ s/^([^\<]*)\<(.*)\>$/ $1 ? "$1 $2" : $2 /er or oops
 }
 
 =for Pod::Coverage addrvis_forget
@@ -334,59 +410,121 @@ sub _RestorePunct() {
 
 ########### Subs callable as either a Function or Method #############
 
-sub __getobj {
-  # A tie handler might throw then $_[0] is referenced
-  my $bl; do{ local $@; eval {$bl=blessed($_[0])}; croak __chop_loc($@) if $@ };
-  $bl && $_[0]->isa(__PACKAGE__) ? shift : __PACKAGE__->new()
+sub __getself { # Return $self if passed or else create a new object
+  local $@;
+  my $blessed = eval{ blessed($_[0]) }; # In case a tie handler throws
+  croak __chop_loc($@) if $@;
+  $blessed && $_[0]->isa(__PACKAGE__) ? shift : __PACKAGE__->new()
 }
-sub __getobj_s { &__getobj->Values([$_[0]]) }
-sub __getobj_a { &__getobj->Values([\@_])   }
-sub __getobj_h {
-  my $o = &__getobj;
-  (scalar(@_) % 2)==0 or croak "Uneven arg count for key => val pairs";
-  $o->Values([{@_}])
+sub __getself_s { &__getself->Values([$_[0]]) }
+sub __getself_a { &__getself->Values([[@_]])   }
+sub __getself_h {
+  my $obj = &__getself;
+  ($#_ % 2)==1 or croak "Uneven arg count for key => val pairs";
+  $obj->Values([{@_}])
 }
-sub __spacedots_getobj {
-  local $Useqq = length($Useqq//"") > 1 ? $Useqq.":spacedots" : $Useqq;
-  &__getobj
+
+sub _EnabSpacedots {
+  # Append :spacedots to Useqq if Useqq matches the global default
+  # (and if the default used extended options).
+  my $self = shift;
+  my $curr = $self->Useqq;
+  return $self if length($curr//"") <= 1 or $curr eq $Useqq;
+  $self->Useqq($curr.":spacedots")
 }
+
+sub _generate_sub($;$) {
+  my ($arg, $proto_only) = @_;
+  (my $methname = $arg) =~ s/.*:://;
+  my sub error($) {
+    croak "Invalid sub/method name '$methname' (@_)\n"
+  }
+
+  # Method names are ivis, dvis, vis, avis, or hvis with prepended
+  # or appended modifier letters or digits (in any order), with
+  # optional underscore separators.
+  local $_ = $methname;
+
+  s/alvis/avisl/;  # Allow 'alvis' for backwards compat.
+  s/hlvis/hvisl/;  # Allow 'hlvis' for backwards compat.
+
+  s/^[^diha]*\K(?:lvis|visl)/avisl/; # 'visl' same as 'avisl' for bw compat.
+
+  s/([ahid]?vis)// or error "can not infer the basic function";
+  my $basename = $1;  # avis, hvis, ivis, dvis, or vis
+  my $N = s/(\d+)// ? $1 : undef;
+  my %mod = map{$_ => 1} split //, $_;
+  delete $mod{"_"}; # ignore underscores
+
+  if (($Debug//0) > 1) {
+    warn "## (D=$Debug) methname=$methname base=$basename \$_=$_\n";
+  }
+  if ($basename =~ /^[id]/) {
+    error "'$1' is inapplicable to $basename" if /([ahl])/;
+  }
+  error "'$1' mis-placed: Only allowed as '${1}vis'" if /([ahid])/;
+
+
+  # All these subs can be called as either or methods or functions.
+  # If the first argument is an object it is used, otherwise a new object
+  # is created; then option-setting methods are called as implied by
+  # the specific sub name.
+  #
+  # Finally the _Do() method is invoked for primatives like 'vis'.
+  #
+  # For ivis/dvis, control jumps to _Interpolate() which uses the object
+  # repeatedly when calling primatives to interpolate values into the string.
+
+  my $listform = '';
+  my $signature = $basename =~ /^[ah]/ ? '@' : '_'; # avis(@) ivis(_) vis(_)
+  my $code = "sub $methname($signature)";
+  if ($proto_only) {
+    $code .= ";";
+  } else {
+    if ($basename eq "vis") {
+      $code .= " { &__getself_s->_Listform('')";
+    }
+    elsif ($basename eq "avis") {
+      my $listform = delete($mod{l}) ? 'l' : 'a';
+      $code .= " { &__getself_a->_Listform('$listform')";
+    }
+    elsif ($basename eq "hvis") {
+      my $listform = delete($mod{l}) ? 'l' : 'h';
+      $code .= " { &__getself_h->_Listform('$listform')";
+    }
+    elsif ($basename eq "ivis") {
+      $code .= " { \@_ = ( &__getself" ;
+    }
+    elsif ($basename eq "dvis") {
+      $code .= " { \@_ = ( &__getself->_EnabSpacedots" ;
+    }
+    else { oops }
+
+    $code .= "->Maxdepth($N)" if defined($N);
+    $code .= '->Objects(0)'   if delete $mod{o};
+    $code .= '->Useqq(0)'     if delete $mod{q};
+    $code .= '->Refaddr(1)'   if delete $mod{r};
+
+    if ($basename =~ /^([id])vis/) {
+      $code .= ", shift, '$1' ); goto &_Interpolate }";
+    } else {
+      $code .= "->_Do }";
+    }
+
+    for (keys %mod) { error "Unknown or inappropriate modifier '$_'" }
+  }
+
+  # To see the generated code
+  #   use Data::Dumper::Interp qw/:debug :DEFAULT/; # or :all
+  if ($Debug) {
+    warn "# generated: $code\n";
+  }
+  eval "$code";  oops "code=$code\n\$@=$@" if $@;
+}#_generate_sub
+
 
 sub visnew()  { __PACKAGE__->new() }  # shorthand
 
-# These can be called as *FUNCTIONS* or as *METHODS*
-sub vis(_)    { &__getobj_s ->_Vistype('')                      ->_Do; }
-sub visq(_)   { &__getobj_s ->_Vistype('')->Useqq(0)            ->_Do; }
-sub avis(@)   { &__getobj_a ->_Vistype('a')                     ->_Do; }
-sub avisq(@)  { &__getobj_a ->_Vistype('a')->Useqq(0)           ->_Do; }
-sub hvis(@)   { &__getobj_h ->_Vistype('h')                     ->_Do; }
-sub hvisq(@)  { &__getobj_h ->_Vistype('h')->Useqq(0)           ->_Do; }
-    # '?l' variants return a bare List without parenthesis/brackets
-sub alvis(@)  { &__getobj_a ->_Vistype('l')                     ->_Do; }
-sub alvisq(@) { &__getobj_a ->_Vistype('l')->Useqq(0)           ->_Do; }
-sub hlvis(@)  { &__getobj_h ->_Vistype('l')                     ->_Do; }
-sub hlvisq(@) { &__getobj_h ->_Vistype('l')->Useqq(0)           ->_Do; }
-    # 'o' variants show object internals
-sub viso(_)   { &__getobj_s ->_Vistype('')->Objects(0)          ->_Do; }
-sub visoq(_)  { &__getobj_s ->_Vistype('')->Objects(0)->Useqq(0)->_Do; }
-    # 'r*' variants prefix ref expansions with type<abbrevaddr>
-sub rvis(_)   { &__getobj_s ->_Vistype('r')                     ->_Do; }
-sub rvisq(_)  { &__getobj_s ->_Vistype('r')->Useqq(0)           ->_Do; }
-sub ravis(@)  { &__getobj_a ->_Vistype('ar')                    ->_Do; }
-sub ravisq(@) { &__getobj_a ->_Vistype('ar')->Useqq(0)          ->_Do; }
-sub rhvis(@)  { &__getobj_h ->_Vistype('hr')                    ->_Do; }
-sub rhvisq(@) { &__getobj_h ->_Vistype('hr')->Useqq(0)          ->_Do; }
-
-# Trampolines which replace the call frame with a call directly to the
-# interpolation code which uses $package DB to access the user's context.
-sub ivis(_) { @_=(&__getobj,          shift,'i');goto &_Interpolate }
-sub ivisq(_){ @_=(&__getobj->Useqq(0),shift,'i');goto &_Interpolate }
-sub dvis(_) { @_=(&__spacedots_getobj,          shift,'d');goto &_Interpolate }
-sub dvisq(_){ @_=(&__getobj->Useqq(0),shift,'d');goto &_Interpolate }
-
-sub rivis(_) { @_=(&__getobj->_Vistype('r')          ,shift,'i');goto &_Interpolate }
-sub rivisq(_){ @_=(&__getobj->_Vistype('r')->Useqq(0),shift,'i');goto &_Interpolate }
-sub rdvis(_) { @_=(&__spacedots_getobj->_Vistype('r'),shift,'d');goto &_Interpolate }
-sub rdvisq(_){ @_=(&__getobj->_Vistype('r')->Useqq(0),shift,'d');goto &_Interpolate }
 
 ############# only internals follow ############
 
@@ -427,21 +565,20 @@ sub _get_terminal_width() {  # returns undef if unknowable
 }
 
 sub _set_default_Foldwidth() {
-  my $self = shift;
   _SaveAndResetPunct();
   $Foldwidth = _get_terminal_width || 80;
   _RestorePunct();
   undef $Foldwidth1;
 }
 
-my $unique = refaddr \&vis;
-my $magic_noquotes_pfx   = "<NQMagic$unique>";
-my $magic_keepquotes_pfx = "<KQMagic$unique>";
-my $magic_addrvis        = "<AVMagic$unique>";
-my $magic_elide_next     = "<ENMagic$unique>";
+my $unique = substr(refaddr \&oops,-5);
+my $magic_noquotes_pfx   = "|NQMagic$unique|";
+my $magic_keepquotes_pfx = "|KQMagic$unique|";
+my $magic_refaddr        = "|RAMagic$unique|";
+my $magic_elide_next     = "|ENMagic$unique|";
 
 #---------------------------------------------------------------------------
-my ($maxstringwidth, $truncsuffix, $objects, $vistype, $debug);
+my ($maxstringwidth, $truncsuffix, $objects, $opt_refaddr, $listform, $debug);
 
 sub _Do {
   oops unless @_ == 1;
@@ -450,8 +587,8 @@ sub _Do {
   local $_;
   &_SaveAndResetPunct;
 
-  ($maxstringwidth, $truncsuffix, $objects, $vistype, $debug)
-    = @$self{qw/MaxStringwidth Truncsuffix Objects _Vistype Debug/};
+  ($maxstringwidth, $truncsuffix, $objects, $opt_refaddr, $listform, $debug)
+    = @$self{qw/MaxStringwidth Truncsuffix Objects Refaddr _Listform Debug/};
 
   $maxstringwidth = 0 if ($maxstringwidth //= 0) >= INT_MAX;
   $truncsuffix //= "...";
@@ -463,7 +600,7 @@ sub _Do {
   btw "##ORIGINAL=",u($original),"=",_dbvis($original) if $debug;
 
   my $modified = $self->visit($original); # see Data::Visitor
-  btw "##MODIFIED (DD input):",_dbvis($modified) if $debug;
+  btw "## DD input : ",_dbvis($modified) if $debug;
   $self->dd->Values([$modified]);
 
   # Always call Data::Dumper with Indent(0) and Pad("") to get a single
@@ -481,14 +618,17 @@ sub _Do {
     if ($dd_warning || $@) {
       warn "Data::Dumper complained:\n$dd_warning\n$@" if $debug;
       ($@, $?) = ($sAt, $sQ);
-      $self->dd->Values([$original]);
-      $our_result = $self->dd->Dump;
+      $our_result = $self->dd->Values([$original])->Dump;
     }
   }
   ($@, $?) = ($sAt, $sQ);
   $self->Pad($users_pad);
 
   $our_result //= $self->_postprocess_DD_result($dd_result, $original);
+
+  # Allow deletion of the possibly-recursive clone
+  circular_off($modified);
+  $self->dd->Values([]);
 
   &_RestorePunct;
   $our_result;
@@ -497,6 +637,89 @@ sub _Do {
 #---------------------------------------------------------------------
 # methods called from Data::Visitor when transforming the input
 
+sub _object_subst($) {
+  my $item = shift;
+  my $overload_depth;
+  CHECKObject: {
+    if (my $class = blessed($item)) {
+      my $enabled;
+      OSPEC:
+      foreach my $ospec (@$objects) {
+        if (ref($ospec) eq "Regexp") {
+          my @stack = ($class);
+          my %seen;
+          while (my $c = shift @stack) {
+            $enabled=1, last OSPEC if $c =~ $ospec;
+            last CHECKObject if $seen{$c}++; # circular ISAs !
+            no strict 'refs';
+            push @stack, @{"${c}::ISA"};
+          }
+        } else {
+          $enabled=1, last OSPEC if ($ospec eq "1" || $item->isa($ospec));
+        }
+      }
+      last CHECKObject
+        unless $enabled;
+      if (overload::Overloaded($item)) {
+btw '@@@repl overloaded ',"\'$class\'" if $debug;
+        # N.B. Overloaded(...) also returns true if it's a NAME of an
+        # overloaded package; should not happen in this case.
+        warn("Recursive overloads on $item ?\n"),last
+          if $overload_depth++ > 10;
+        # Stringify objects which have the stringification operator
+        if (overload::Method($class,'""')) {
+          my $prefix = _show_as_number($item) ? $magic_noquotes_pfx : "";
+btw '@@@repl prefix="',$prefix,'"' if $debug;
+          $item = $item.""; # stringify;
+          if ($item !~ /^${class}=REF/) {
+            $item = "${prefix}($class)$item";
+          } else {
+            # The "stringification" looks like Perl's default; don't prefix it
+          }
+btw '@@@repl stringified:',$item if $debug;
+          redo CHECKObject;
+        }
+        # Substitute the virtual value behind an overloaded deref operator
+        if (overload::Method($class,'@{}')) {
+btw '@@@repl (overload...)' if $debug;
+          $item = \@{ $item };
+          redo CHECKObject;
+        }
+        if (overload::Method($class,'%{}')) {
+btw '@@@repl (overload...)' if $debug;
+          $item = \%{ $item };
+          redo CHECKObject;
+        }
+        if (overload::Method($class,'${}')) {
+btw '@@@repl (overload...)' if $debug;
+          $item = \${ $item };
+          redo CHECKObject;
+        }
+        if (overload::Method($class,'&{}')) {
+btw '@@@repl (overload...)' if $debug;
+          $item = \&{ $item };
+          redo CHECKObject;
+        }
+        if (overload::Method($class,'*{}')) {
+btw '@@@repl (overload...)' if $debug;
+          $item = \*{ $item };
+          redo CHECKObject;
+        }
+      }
+      if ($class eq 'Regexp') {
+        # D::D will just stringify it, which is fine except actual tabs etc.
+        # will be shown as themselves and not \t etc.
+        # We try to fix that in _postprocess_DD_result;
+      } else {
+        # No overloaded operator (that we care about);
+        # substitute addrvis(obj)
+btw '@@@repl (no overload repl, not Regexp)' if $debug;
+        $item = ${magic_noquotes_pfx}.addrvis($item);
+      }
+    }
+  }#CHECKObject
+  $item
+}#_object_subst
 
 sub visit_value {
   my $self = shift;
@@ -505,7 +728,13 @@ sub visit_value {
   # N.B. Not called for hash keys (short-circuited in visit_hash_key)
 
   return $item
-    if !defined($item) or reftype($item);  # undef or some kind of ref
+    if !defined($item);
+
+  return _object_subst($item)
+    if defined(blessed $item);
+
+  return $item
+    if reftype($item);  # some other (i.e. not blessed) reference
 
   # Prepend a "magic prefix" (later removed) to items which Data::Dumper is
   # likely to represent wrongly or anyway not how we want:
@@ -544,114 +773,56 @@ sub visit_hash_key {
   return $item; # don't truncate or otherwise munge
 }
 
-sub _prefix_addrvis($$) {
+sub _prefix_refaddr($$) {
   my ($item, $original) = @_;
-  # Called only if enabled (by _Vistype containint 'r').
+  # If enabled by Refaddr(true):
   #
-  # Prefix (the formatted representation of) a ref with it's type 
-  # and abbreviated address.  This is done by wrapping the ref in
-  # a temporary [array] with the addrvis result, and unwrapping the
-  # Data::Dumper result in _postprocess_DD_result().
-  $item = [ $magic_addrvis.addrvis($original), $item, $magic_elide_next, ];
-  btw '@@@addrvis prefixed item:',_dbvis2($item) if $debug;
+  # Prefix (the formatted representation of) a ref with it's abbreviated
+  # address.  This is done by wrapping the ref in a temporary [array] with the
+  # prefix, and unwrapping the Data::Dumper result in _postprocess_DD_result().
+  #
+  # However don't do this if $item already has an addrvis() substituted,
+  # which happens if an object does not stringify or provide another overload
+  # replacement -- see _object_subst().
+  return $item unless $opt_refaddr;
+  my $pfx = addrvis(refaddr($original));
+  return $item if index($item,$pfx) >= 0;
+  $item = [ $magic_refaddr.$pfx, $item, $magic_elide_next, ];
+  btwN 1, '@@@addrvis-prefixed object:',_dbvis2($item) if $debug;
   $item
 }
 
 sub visit_object {
   my $self = shift;
-  say "!V object ",_dbravis2(@_) if $debug;
   my $item = shift;
+  say "!V object a=",addrvis(refaddr $item)," item=",_dbvis1($item) if $debug;
   my $original = $item;
-  my $overload_depth;
-  CHECK: {
-    if (my $class = blessed($item)) {
-      my $enabled;
-      OSPEC:
-      foreach my $ospec (@$objects) {
-        if (ref($ospec) eq "Regexp") {
-          my @stack = ($class);
-          my %seen;
-          while (my $c = shift @stack) {
-            $enabled=1, last OSPEC if $c =~ $ospec;
-            last CHECK if $seen{$c}++; # circular ISAs !
-            no strict 'refs';
-            push @stack, @{"${c}::ISA"};
-          }
-        } else {
-          $enabled=1, last OSPEC if ($ospec eq "1" || $item->isa($ospec));
-        }
-      }
-      last CHECK
-        unless $enabled;
-      if (overload::Overloaded($item)) {
-btw '@@@repl overloaded ',"\'$class\'" if $debug;
-        # N.B. Overloaded(...) also returns true if it's a NAME of an
-        # overloaded package; should not happen in this case.
-        warn("Recursive overloads on $item ?\n"),last
-          if $overload_depth++ > 10;
-        # Stringify objects which have the stringification operator
-        if (overload::Method($class,'""')) {
-          my $prefix = _show_as_number($item) ? $magic_noquotes_pfx : "";
-btw '@@@repl prefix="',$prefix,'"' if $debug;
-          $item = $item.""; # stringify;
-          if ($item !~ /^${class}=REF/) {
-            $item = "${prefix}($class)$item";
-          } else {
-            # The "stringification" looks like Perl's default; don't prefix it
-          }
-btw '@@@repl stringified:',$item if $debug;
-          redo CHECK;
-        }
-        # Substitute the virtual value behind an overloaded deref operator
-        if (overload::Method($class,'@{}')) {
-btw '@@@repl (overload...)' if $debug;
-          $item = \@{ $item };
-          redo CHECK
-        }
-        if (overload::Method($class,'%{}')) {
-btw '@@@repl (overload...)' if $debug;
-          $item = \%{ $item };
-          redo CHECK;
-        }
-        if (overload::Method($class,'${}')) {
-btw '@@@repl (overload...)' if $debug;
-          $item = \${ $item };
-          redo CHECK;
-        }
-        if (overload::Method($class,'&{}')) {
-btw '@@@repl (overload...)' if $debug;
-          $item = \&{ $item };
-          redo CHECK;
-        }
-        if (overload::Method($class,'*{}')) {
-btw '@@@repl (overload...)' if $debug;
-          $item = \*{ $item };
-          redo CHECK;
-        }
-      }
-      # No overloaded operator (that we care about); always use addrvis(obj)
-      # except for refs to a regex which Data::Dumper formats nicely by itself.
-      unless ($class eq 'Regexp') {
-btw '@@@repl (no overload repl, not Regexp)' if $debug;
-        #$item = "$item";  # will show with "quotes"
-        #$item = ${magic_noquotes_pfx}.$item; # omit "quotes"
-        $item = ${magic_noquotes_pfx}.addrvis($item);
-      }
-    }
-  }#CHECK
-  $item = _prefix_addrvis($item, $original) if index($vistype,"r") >= 0;
+
+  # First register the ref (to detect duplicates);
+  # this calls visit_seen() which usually substitutes something
+  $item = $self->SUPER::visit_object($item);
+  say "!       new item=",_dbrvis2($item) if $debug;
+
+  $item = _prefix_refaddr($item, $original);
   $item
 }#visit_object
 
 sub visit_ref {
   my ($self, $item) = @_;
-  say "!V ref  ref()=",ref($item)," item=",_dbravis2($item) if $debug;
+  if (ref($item) eq 'ARRAY') {
+    say "!V ref  A=",addrvis(refaddr $item)," item=",_dbavis2(@$item) if $debug;
+  } else {
+    say "!V ref  a=",addrvis(refaddr $item)," item=",_dbvis1($item) if $debug;
+  }
   my $original = $item;
+
   # First descend into the structure, probably returning a clone
   $item = $self->SUPER::visit_ref($item);
-  # If the ref wasn't replaced by a non-ref, prefix it with the
-  # original address if requested.
-  $item = _prefix_addrvis($item, $original) if index($vistype,"r") >= 0;
+  say "!       new item=",_dbrvis2($item) if $debug;
+
+  # Prefix whatever the representation is now with the original address
+  $item = _prefix_refaddr($item, $original);
+
   $item
 }
 
@@ -664,16 +835,26 @@ sub visit_glob {
   return $item
 }
 
-# This was not as good as allowing DD to put in a $VAR1 expression
-# Instead, we need to do something to break cycles in the clone to avoid
-# a memory leak!
-#sub visit_seen {
-#  my ($self, $data, $first_result) = @_;
-#  #say "!V seen ",_dbravis2(@_) if $debug;
-#  say "!V seen ",_dbravis2($first_result) if $debug; ###
-#  # Replace circular reference with original ITEM<address>
-#  $magic_noquotes_pfx.addrvis($data)
-#}
+sub visit_seen {
+  my ($self, $data, $first_result) = @_;
+  say "!V seen orig=",_dbrvis2($data),"  1stres=",_dbrvis2($first_result)
+    if $debug;
+  if ($opt_refaddr) {
+    # The $VAR->... expression generated by Data::Dumper will show a wrong
+    # subscript because D::D will see the temporary wrapper array
+    # inserted by _prefix_refaddr().  Instead, just show addrvis($data)
+    # which will include the refaddr of the first-seen copy.
+    #
+    my $t = ref($data);
+    return $magic_noquotes_pfx.addrvis(refaddr $data)."[...]" if $t eq "ARRAY";
+    return $magic_noquotes_pfx.addrvis(refaddr $data)."{...}" if $t eq "HASH";
+    return $magic_noquotes_pfx.addrvis($data);
+  }
+  # else: D::D's $VAR expression will correctly reflect the user's
+  #       data structure.   Should we always use addrvis, which
+  #       might avoid an undeletable circular clone???
+  $first_result
+}
 
 #---------------------------------------------------------------------
 sub _preprocess { # Modify the cloned data
@@ -865,7 +1046,7 @@ sub _show_as_number(_) {
       if $Debug;
     return 0;
   }
-}
+}# _show_as_number
 
 # Split keys into "components" (e.g. 2_16.A has 3 components) and sort
 # components containing only digits numerically.
@@ -905,6 +1086,8 @@ my $anyvname_re =
                     | [-+!\$\&\;i"'().,\@\/:<>?\[\]\~\^\\] /x;
 
 my $anyvname_or_refexpr_re = qr/ ${anyvname_re} | ${curlies_re} /x;
+
+my $addrvis_re = qr/\<\d+:[\da-fA-F]+\>/;
 
 sub __unmagic_atom() {  # edits $_
   s/(['"])([^'"]*?)
@@ -955,13 +1138,21 @@ my %qqesc2controlpic = (
   '\r' => "\N{SYMBOL FOR CARRIAGE RETURN}",
   '\t' => "\N{SYMBOL FOR HORIZONTAL TABULATION}",
 );
-sub __subst_controlpics() {  # edits $_
-  if (/^"/) {
-    s{ \G (?: [^\\]++ | \\[^0abefnrt] )*+ \K ( \\[abefnrt] | \\0(?![0-7]) )
-     }{
-        $qqesc2controlpic{$1} // $1
-      }xesg;
-  }
+my %char2controlpic = (
+  map{ 
+    my $cp = $qqesc2controlpic{$_};
+    my $char = eval(qq("$_")) // die;
+    die "XX<<$_>> YY<<$char>>" unless length($char) == 1;
+    ($char => $cp)
+  } keys %qqesc2controlpic
+);
+sub __subst_controlpic_backesc() {  # edits $_
+  # Replace '\t' '\n' etc. escapes with "control picture" characters
+  return unless/^"/;
+  s{ \G (?: [^\\]++ | \\[^0abefnrt] )*+ \K ( \\[abefnrt] | \\0(?![0-7]) )
+   }{
+      $qqesc2controlpic{$1} // $1
+    }xesg;
 }
 sub __subst_spacedots() {  # edits $_
   if (/^"/) {
@@ -986,8 +1177,8 @@ use constant _WRAP_STYLE => (_WRAP_ALLHASH);
 sub _postprocess_DD_result {
   (my $self, local $_, my $original) = @_;
   no warnings 'recursion';
-  my ($debug, $vistype, $foldwidth, $foldwidth1)
-    = @$self{qw/Debug _Vistype Foldwidth Foldwidth1/};
+  my ($debug, $listform, $foldwidth, $foldwidth1)
+    = @$self{qw/Debug _Listform Foldwidth Foldwidth1/};
   my $useqq = $self->Useqq();
   my $unesc_unicode = $useqq =~ /utf|unic/;
   my $controlpics   = $useqq =~ /pic/;
@@ -997,9 +1188,12 @@ sub _postprocess_DD_result {
 
   $indent_unit = 2; # make configurable?
 
+  my $maxlinelen = $foldwidth1 || $foldwidth || INT_MAX;
+  my $maxlineNlen = ($foldwidth // INT_MAX) - length($pad);
+
   if ($debug) {
     our $_dbmaxlen = INT_MAX;
-    btw '##RAW DD result: ',_dbrawstr($_);
+    btw "## pp_DD fw1=",u($foldwidth1)," fw=",u($foldwidth)," pad='${pad}' maxll=$maxlinelen maxlNl=$maxlineNlen\n   result=",_dbrawstr($_);
   }
 
   my $top = { tlen => 0, children => [] };
@@ -1012,7 +1206,7 @@ sub _postprocess_DD_result {
 
     __unmagic_atom ;
     __unesc_unicode          if $unesc_unicode;
-    __subst_controlpics      if $controlpics;
+    __subst_controlpic_backesc      if $controlpics;
     __subst_spacedots        if $spacedots;
     __change_quotechars($qq) if $qq;
 
@@ -1030,7 +1224,7 @@ sub _postprocess_DD_result {
       elsif ($mode eq "open") {
         my $child = {
           O => $_,
-          tlen => 0,
+          tlen => 0, # incremented below
           children => [],
           C => undef,
           parent => $context,
@@ -1042,14 +1236,14 @@ sub _postprocess_DD_result {
       elsif ($mode eq "close") {
         oops if defined($context->{C});
         $context->{C} = $_;
-        $context->{tlen} += length($_);
+        $context->{tlen} += length;
         $context = $context->{parent}; # undef if closing the top item
       }
       elsif ($mode eq "append_to_prev") {
         my $prev = $context;
         { #block for 'redo'
-          oops unless @{$prev->{children}} > 0;
-          if (ref($prev->{children}->[-1] // oops("No previous!"))) {
+          oops "No previous!" unless @{$prev->{children}} > 0;
+          if (ref($prev->{children}->[-1] // oops)) {
             $prev = $prev->{children}->[-1];
             if (! $prev->{C}) { # empty or not-yet-read closer?
               redo; # ***
@@ -1076,7 +1270,7 @@ sub _postprocess_DD_result {
     }
   }#atom
 
-  my sub equal_greater($) {  # =>
+  my sub fat_arrow($) {  # =>
     my $lhs = $context->{children}->[-1] // oops;
     oops if ref($lhs);
     my $newchild = {
@@ -1100,13 +1294,13 @@ sub _postprocess_DD_result {
   # At any nesting level, if everything (including any nested levels) fits
   # on a single line, then that part is output without folding;
   #
-  # 4/25/2023: Added the (non-public) config constant _WRAP_STYLE;
+  # 4/25/2023: Now controlled by constant _WRAP_STYLE:
   #
   # (_WRAP_STYLE == _WRAP_ALWAYS):
   # If folding is necessary, then *every* member of the folded block
   # appears on a separate line, so members all vertically align.
   #
-  # (_WRAP_STYLE & _WRAP_ALLHASH): Members of a hash (key => value)
+  # *(_WRAP_STYLE & _WRAP_ALLHASH): Members of a hash (key => value)
   # are shown on separate lines, but not members of an array.
   #
   # Otherwise:
@@ -1152,11 +1346,6 @@ sub _postprocess_DD_result {
   #
   # Note: Indentation is done regardless of Foldwidth, so deeply nested
   # structures may extend beyond Foldwidth even if all elements are short.
-
-  my $foldwidthN = $foldwidth || INT_MAX;
-  my $maxlinelen = $foldwidth1 || $foldwidthN;
-  $foldwidthN -= length($pad);
-  $maxlinelen -= length($pad);
 
   my $outstr;
   my $linelen;
@@ -1233,6 +1422,7 @@ sub _postprocess_DD_result {
           $outstr =~ s/ +\z//;
           $outstr .= "\n$indent";
           $linelen = $indent_width;
+          $maxlinelen = $maxlineNlen;
 
           # elide any initial spaces after wrapping, e.g. in " => "
           $child =~ s/^ +// unless ref($child);
@@ -1255,6 +1445,7 @@ sub _postprocess_DD_result {
           $outstr =~ s/ +\z//;
           $outstr .= "\n$indent" . (' ' x $indent_unit);
           $linelen = $indent_width + $indent_unit;
+          $maxlinelen = $maxlineNlen;
           btw "#     (l $level): Wrap after opener: os=",_dbstr($outstr) if $debug;
         }
         __SUB__->($child);
@@ -1263,6 +1454,7 @@ sub _postprocess_DD_result {
           $outstr =~ s/ +\z//;
           $outstr .= "\n$indent";
           $linelen = $indent_width;
+          $maxlinelen = $maxlineNlen;
           btw "#     (l $level): Wrap after closer; ll=$linelen os=",_dbstr($outstr) if $debug;
         }
         $outstr .= $child->{C};
@@ -1278,14 +1470,14 @@ sub _postprocess_DD_result {
     }
   }#expand_children
 
-  # Remove the magic wrapper created by _prefix_addrvis().  The original $ref 
-  # was replaced by 
+  # Remove the magic wrapper created by _prefix_refaddr().  The original $ref
+  # was replaced by
   #
-  #    [ $magic_addrvis.addrvis($ref), $ref, $magic_elide_next, ];
+  #    [ $magic_refaddr.addrvis($ref), $ref, $magic_elide_next, ];
   #
   # Data::Dumper formatted the magic* items as "quoted strings"
   #
-  s/\[\s*(["'])\Q$magic_addrvis\E(.*?)\1,\s*/$2/gs;
+  s/\[\s*(["'])\Q$magic_refaddr\E(.*?)\1,\s*/$2/gs;
   s/,\s*(["'])\Q$magic_elide_next\E\1,?\s*\]//gs
     && $debug && btw "Unwrapped addrvis:",_dbvis($_);
 
@@ -1294,11 +1486,32 @@ sub _postprocess_DD_result {
     elsif (/\G[,;]/gc)                           { atom($&, "append_to_prev") }
     elsif (/\G"(?:[^"\\]++|\\.)*+"/gsc)          { atom($&) } # "quoted"
     elsif (/\G'(?:[^'\\]++|\\.)*+'/gsc)          { atom($&) } # 'quoted'
-    elsif (m(\Gqr/(?:[^\\\/]++|\\.)*+/[a-z]*)gsc){ atom($&) } # Regexp
-    elsif (/\G[A-Za-z][:\w]*\<\d+:[\da-fA-F]+\>/gsc) { 
-      # addrvis() result e.g. My::Package<decimal:hex>
-      atom($&, "prepend_to_next");
+    elsif (m(\Gqr/(?:[^\\\/]++|\\.)*+/[a-z]*)gsc){  # Regexp
+      local $_ = $&;
+      # Data::Dumper just stringifies a compiled regex, and Perl (v5.34)
+      # does not stringify actual tab as \t etc. probably because the result
+      # would be ambiguous if preceeded by another backslash, e.g.
+      #  \<tab> -> \\t would be wrong (backslash character + 't').
+      #
+      # If 'controlpics' is enabled, they are always substituted and then
+      # a preceding backslash is not a problem; otherwise \-escapes are
+      # substituted only if not preceded by another backslash.
+      if ($controlpics) {
+        s{([\x{0}\a\b\e\f\n\r\t])}{ $char2controlpic{$1} // $1 }esg;
+      } else {
+        if (/[\x{0}\a\b\e\f\n\r\t]/) {
+          s/(?<!\\)\x{0}/\\0/g;
+          s/(?<!\\)[\b]/\N{SYMBOL FOR BACKSPACE}/; # Bare \b matches boundaries
+          s/(?<!\\)\e/\\e/g;
+          s/(?<!\\)\f/\\f/g;
+          s/(?<!\\)\x{0A}/\\n/g;
+          s/(?<!\\)\x{0D}/\\r/g;
+          s/(?<!\\)\t/\\t/g;
+        }
+      } 
+      atom($_)
     }
+    elsif (/\G${addrvis_re}/gsc)                 { atom($&, "prepend_to_next") }
 
     # With Deparse(1) the body has arbitrary Perl code, which we can't parse
     elsif (/\Gsub\s*${curlies_re}/gc)            { atom($&) } # sub{...}
@@ -1306,14 +1519,14 @@ sub _postprocess_DD_result {
     # $VAR1->[ix] $VAR1->{key} or just $varname
     elsif (/\G(?:my\s+)?\$(?:${userident_re}|\s*->\s*|${balanced_re}+)++/gsc) { atom($&) }
 
-    elsif (/\G\b[A-Za-z_][A-Za-z0-9_]*+\b/gc) { atom($&) } # bareword?
-    elsif (/\G-?\d[\deE\.]*+\b/gc)            { atom($&) } # number
-    elsif (/\G\s*=>\s*/gc)                    { equal_greater($&) }
-    elsif (/\G\s*=(?=[\w\s'"])\s*/gc)         { atom($&) }
-    elsif (/\G:*${pkgname_re}/gc)             { atom($&) }
-    elsif (/\G[\[\{\(]/gc)                    { atom($&, "open") }
-    elsif (/\G[\]\}\)]/gc)                    { atom($&, "close") }
-    elsif (/\G\s+/sgc)                        {          }
+    elsif (/\G\b[A-Za-z_][A-Za-z0-9_]*+\b/gc)    { atom($&) } # bareword?
+    elsif (/\G-?\d[\deE\.]*+\b/gc)               { atom($&) } # number
+    elsif (/\G\s*=>\s*/gc)                       { fat_arrow($&) }
+    elsif (/\G\s*=(?=[\w\s'"])\s*/gc)            { atom($&) }
+    elsif (/\G:*${pkgname_re}/gc)                { atom($&) }
+    elsif (/\G[\[\{\(]/gc)                       { atom($&, "open") }
+    elsif (/\G[\]\}\)]/gc)                       { atom($&, "close") }
+    elsif (/\G\s+/sgc)                           {          }
     else {
       my $remnant = substr($_,pos//0);
       Carp::cluck "UNPARSED ",_dbstr(substr($remnant,0,30)."..."),"  ",_dbstrposn($_,pos()//0),"\nFULL STRING:",_dbstr($_),"\n(Using remainder as-is)\n" ;
@@ -1331,17 +1544,18 @@ sub _postprocess_DD_result {
   $level = 0;
   expand_children($top);
 
-  if (index($vistype,'a') >= 0) {
+  if (index($listform,'a') >= 0) {
     # show [...] as (val1,val2,...) array initializer
-    $outstr =~ s/\A\[/(/ && $outstr =~ s/\]\z/)/s or oops;
+    # Remove any initial Addrvis prefix
+    $outstr =~ s/\A(?:${addrvis_re})?\[/(/ && $outstr =~ s/\]\z/)/s or oops _dbvis($outstr);
   }
-  elsif (index($vistype,'h') >= 0) {
+  elsif (index($listform,'h') >= 0) {
     # show {...} as (key => val, ...) hash initializer
-    $outstr =~ s/\A\{/(/ && $outstr =~ s/\}\z/)/s or oops;
+    $outstr =~ s/\A(?:${addrvis_re})?\{/(/ && $outstr =~ s/\}\z/)/s or oops;
   }
-  elsif (index($vistype,'l') >= 0) {
+  elsif (index($listform,'l') >= 0) {
     # show as a bare list without brackets
-    $outstr =~ s/\A[\[\{]// && $outstr =~ s/[\]\}]\z//s or oops;
+    $outstr =~ s/\A(?:${addrvis_re})?[\[\{]// && $outstr =~ s/[\]\}]\z//s or oops;
   }
 
   # Insert user-specified padding after each embedded newline
@@ -1486,7 +1700,7 @@ sub DB_Vis_Interpolate {
     elsif ($methname eq 'e') {
       $result .= DB::DB_Vis_Eval($funcname, $arg);
     } else {
-      # Reduce indent before first wrap to account for stuff alrady there
+      # Reduce width before first wrap to account for stuff already on the line
       my $leftwid = length($result) - rindex($result,"\n") - 1;
       my $foldwidth = $self->{Foldwidth};
       local $self->{Foldwidth1} = $self->{Foldwidth1} // $foldwidth;
@@ -1595,7 +1809,7 @@ Data::Dumper::Interp - interpolate Data::Dumper output into strings for human co
   say hvis %hash;    #prints (abc => [1,2,3,4,5], def => undef)
 
   # Format a reference with abbreviated referent address
-  say rvis $href;    #prints HASH<457:1c9>{abc => [1,2,3,4,5], ...}
+  say visr $href;    #prints HASH<457:1c9>{abc => [1,2,3,4,5], ...}
 
   # Just abbreviate a referent address or arbitrary number
   say addrvis refaddr($ref);  # 457:1c9
@@ -1608,10 +1822,16 @@ Data::Dumper::Interp - interpolate Data::Dumper output into strings for human co
     say vis $struct;
       # --> {debt => (Math::BigFloat)999999999999999999.02}
 
-    # But if you do want to see object internals
+    # But if you do want to see object internals...
+    #
     say visnew->Objects(0)->vis($struct);
-    { local $Data::Dumper::Interp::Objects=0; say vis $struct; } #another way
       # --> {debt => bless({...lots of stuff...},'Math::BigInt')}
+
+    # or, equivalently
+    { local $Data::Dumper::Interp::Objects=0; say vis $struct; }
+
+    # yet another equivalent way
+    say viso $struct;   # not exported by default
   }
 
   # Wide characters are readable
@@ -1645,19 +1865,19 @@ and avoids side-effects which interfere with debugging.
 
 The namesake feature is interpolating Data::Dumper output
 into strings, but simple functions are also provided
-to show a scalar, array, or hash.
+to format a scalar, array, or hash.
 
 Internally, Data::Dumper is called to visualize (i.e. format) data
 with pre- and post-processing to "improve" the results:
 
 =over 2
 
-=item * Output is compact (1 line if possible,
-otherwise folded at your terminal width), WITHOUT a trailing newline.
+=item * Output is 1 line if possible,
+otherwise folded at your terminal width, WITHOUT a trailing newline.
 
 =item * Printable Unicode characters appear as themselves.
 
-=item * Object internals are not shown; Math:BigInt etc. are stringified.
+=item * Object internals are not shown by default; Math:BigInt etc. are stringified.
 
 =item * "virtual" values behind overloaded deref operators are shown.
 
@@ -1667,7 +1887,7 @@ otherwise folded at your terminal width), WITHOUT a trailing newline.
 
 See "DIFFERENCES FROM Data::Dumper".
 
-Finally, a few utilities are provided to quote strings for /bin/sh.
+A few utilities are also provided to quote strings for /bin/sh.
 
 =head1 FUNCTIONS
 
@@ -1692,13 +1912,13 @@ from interpolating it beforehand.
 
 =head2 dvis 'string to be interpolated'
 
-Like C<ivis> with the addition that interpolated items
-are prefixed with a "exprtext=" label.
+Like C<ivis> but interpolations are prefixed with a "expr=" label
+and spaces are shown visibly as '·'.
 
 The 'd' in 'dvis' stands for B<d>ebugging messages, a frequent use case where
-brevity of typing is more highly prized than beautiful output.
+brevity of typing is needed.
 
-=head2 vis optSCALAREXPR
+=head2 vis [SCALAREXPR]
 
 =head2 avis LIST
 
@@ -1711,65 +1931,157 @@ C<avis> formats an array (or any list) as comma-separated values in parenthesis.
 
 C<hvis> formats key => value pairs in parenthesis.
 
-=head2 B<< I<Variations> >>
+=head2 FUNCTION (and METHOD) VARIATIONS
 
-=head3 B<alvis, hlvis>
+Variations of the above five functions have extra characters
+in their names to imply certain options.
+For example C<visq> is like C<vis> but
+shows strings in single-quoted form (implied by the 'B<q>' suffix).
 
-The "B<l>" variants return a bare list of array or hash members
-without the enclosing parenthesis.
+There are no fixed function names; you can use any combination of
+characters in any order, prefixed or suffixed to the primary name;
+the function will be I<generated> when it is imported* or called as a method.
 
-=head3 B<ivisq dvisq visq avisq hvisq alvisq hlvisq>
+The available modifier characters are:
 
-The "B<q>" variants show strings 'single quoted' if possible.
+=over 2
 
-Internally, Data::Dumper is called with C<Useqq(0)>, but depending on
-the version of Data::Dumper the result may be "double quoted" anyway
-if wide characters are present.
+B<l> - omit parenthesis to return a bare list (only with "avis" or "hvis")
 
-=head3 B<rivis rdvis rvis ravis rhvis rivisq rdvisq rvisq ravisq rhvisq>
+B<o> - show object internals
 
-The "B<r>" variants show the
-I<< type<abbreviated refaddr> >> before refs (see I<addrvis>).  
-For example B<rvis([1..3])> returns something like "ARRAYZ<><457:1c9>[1,2,3]".
+=over
 
-=head3 B<viso visoq>
+Calling B<< Objects(0) >> using the OO api has the same effect.
 
-The "B<o>" variants show the internals of objects, the same as if
-C<$Objects> is set to 0.  By default object internals are never shown,
-see I<Objects(BOOL)>.
+=back
 
-=head2 addrvis REF
+B<q> - show strings 'single quoted' if possible
 
-=head2 addrvis NUMBER
+=over
 
-These return a string showing the address in both decimal and hexadecimal, 
-but abbreviated to only the last few digits.
+Internally, Data::Dumper is called with C<Useqq(0)>, but depending
+on the version of Data::Dumper the result may be "double quoted"
+anyway if wide characters are present.
+
+=back
+
+B<r> - show abbreviated addresses of objects and other refs
+
+=over
+
+Calling B<< Reftype(1) >> using the OO api has the same effect.
+
+=back
+
+B<NUMBER> - limit nested structure depth to NUMBER levels
+
+=over
+
+Calling B<< Maxdepth(NUMBER) >> using the OO api has the same effect.
+
+=back
+
+=back
+
+If you call a function directly it must be explicitly listed
+in the C<< S<use Data::Dumper::Interp ... ;> >> statement
+unless it is imported by default (list shown below)
+or created via the :all tag.
+
+To avoid having to specify functions in advance, you can
+use them as methods and import only the C<visnew> function:
+
+  use Spreadsheet::Edit::Interp qw/visnew/;
+  ...
+  say visnew->vis($struct);
+  say visnew->visrq($my_object);
+  say visnew->avis(@ARGV);
+  say visnew->avis2lrq(@ARGV);
+  etc.
+
+(C<visnew> creates a new object.  Non-existent methods are auto-generated when
+first called via the AUTOLOAD mechanism).
+
+=head2 Functions imported by default
+
+ ivis  dvis    vis  avis  hvis
+
+ ivisq dvisq   visq avisq hvisq rvis rvisq
+
+ visnew
+ addrvis addrvisl
+ u quotekey qsh qshlist qshpath
+
+=head2 The :all import tag
+Z<> Z<>
+
+  use Data::Dumper::Interp qw/:all/;
+
+This generates and imports all possible variations (with NUMBER <= 2).
+that have suffix characters in alphabetical order.
+There are 119 variations, too many to remember.
+
+But you only really need to remember the five standard names
+
+  ivis, dvis, vis, avis, and hvis
+
+and the possible suffixes and their order (I<NUMBER>,l,o,q,r).
+
+For example, one function is C<avis2lq>, which
+
+ * Formats multiple arguments as an array ('avis')
+ * Decends at most 2 levels into structures ('2')
+ * Returns a comma-separated list *without* parenthesis ('l')
+ * Shows strings in single-quoted form ('q')
+
+You could equally well have made up different names like C<avis2ql>, C<q2avisl> etc.
+for the same function if you explicitly imported those alternate
+names or called them as methods.
+
+* To save memory, only stub declarations for prototype
+checking are generated for imported functions.
+The body will be generated when a function is actually used
+via the AUTOLOAD mechanism.  The C<:debug> import tag
+prints messages as these events occur.
+
+=head1 Showing Abbreviated Addresses
+
+=head2 addrvis REF_or_NUMBER
+
+This function returns a string showing an address in both decimal and 
+hexadecimal, but abbreviated to only the last few digits.
 
 The number of digits increases over time if necessary to keep new results
 unambiguous.
 
-For REFs, the result is like I<< "HASHE<lt>457:1c9E<gt>" >> 
+For REFs, the result is like I<< "HASHE<lt>457:1c9E<gt>" >>
 or, for blessed objects, I<< "Package::NameE<lt>457:1c9E<gt>" >>.
 
-If the argument is a plain number, just the abbreviated address
-like I<< "E<lt>457:1c9E<gt>" >> is returned.
+If the argument is a plain number, just the abbreviated decimal:hex address
+is returned, e.g. I<< "E<lt>457:1c9E<gt>" >>.
 
 I<"undef"> is returned if the argument is undefined.
 
-=head1 OBJECT-ORIENTED INTERFACES
+Croaks if the argument is defined but not a ref.
+
+=head2 addrvisl REF_or_NUMBER
+
+Like C<addrvis> but omits the <angle brackets>.
+
+=head1 OBJECT-ORIENTED API
 
 =head2 Data::Dumper::Interp->new()
 
 =head2 visnew()
 
-Creates an object initialized from the global configuration
-variables listed below
-(the function C<visnew> is simply a shorthand wrapper).
+These create an object initialized from the global configuration
+variables listed below.  C<visnew> is simply a shorthand wrapper.
 
 No arguments are permitted.
 
-The functions described above may then be called as I<methods>
-on the object
+B<All the functions described above> including all possible variations
+may be called as I<methods> on an object
 (when not called as a method the functions create a new object internally).
 
 For example:
@@ -1779,19 +2091,18 @@ For example:
 returns the same string as
 
    local $Data::Dumper::Interp::Foldwidth = 40;
-   $msg = avis(@ARGV);
+   $msg = avis @ARGV;
 
 =head1 Configuration Variables / Methods
 
 These work the same way as variables/methods in Data::Dumper.
 
 Each config method has a corresponding global variable
-in package C<Data::Dumper::Interp> which provides the default.
+in package C<Data::Dumper::Interp> which provides the default value.
 
-When a method is called without arguments the current value is returned.
-
-When a method is called with an argument to set a value, the object
-is returned so that method calls can be chained.
+When a config method is called without arguments the current value is returned,
+and when called with an argument the value is changed and
+the object is returned so that calls can be chained.
 
 =head2 MaxStringwidth(INTEGER)
 
@@ -1817,17 +2128,12 @@ A "1" (the default) enables for all objects,
 otherwise only for the specified class name(s) [or derived classes].
 
 When enabled, object internals are never shown.
-If the object overloads the stringification ('""') operator,
-or array-, hash-, scalar-, or glob- deref operators,
-then the first overloaded operator found will be evaluated,
-object replaced by the result, and the check repeated; otherwise
-only the class and abbreviated address are shown as with C<addrvis>
-e.g. "Foo::Bar<392:0f0>".
-
-Beginning with version 5.000 the B<deprecated> C<Overloads> method
-is an alias for C<Objects>.
-
-=for Pod::Coverage Overloads btw
+The class and abbreviated address are shown as with C<addrvis>
+e.g. "Foo::Bar<392:0f0>", unless the object overloads
+the stringification ('""') operator,
+or array-, hash-, scalar-, or glob- deref operators;
+in that case the first overloaded operator found will be evaluated,
+the object replaced by the result, and the check repeated.
 
 =head2 Sortkeys(subref)
 
@@ -1836,12 +2142,9 @@ value, e.g. "A.20" sorts before "A.100".  See C<Data::Dumper> documentation.
 
 =head2 Useqq
 
-The default value is "unicode" except for
-functions/methods with 'q' in their name, which force C<Useqq(0)>.
-
 0 means generate 'single quoted' strings when possible.
 
-1 means generate "double quoted" strings, as-is from Data::Dumper.
+1 means generate "double quoted" strings as-is from Data::Dumper.
 Non-ASCII charcters will be shown as hex escapes.
 
 Otherwise generate "double quoted" strings enhanced according to option
@@ -1858,15 +2161,14 @@ characters are shown as themselves rather than hex escapes, and
 
 =item "controlpics"
 
-Show ASCII control characters using single "control picture" characters,
-for example '␤' is shown for newline instead of '\n', and
-similarly for \0 \a \b \e \f \r and \t.
+Show ASCII control characters using single "control picture" characters:
+'␤' is shown for newline instead of '\n', and
+similarly ␀ ␇ ␈ ␛ ␌ ␍ ␉ for \0 \a \b \e \f \r \t.
 
-Every character occupies the same space with a fixed-width font.
-However the commonly-used "Last Resort" font for these characters
-can be hard to read on modern high-res displays.
-Set C<Useqq> to just "unicode" to see traditional \n etc.
-backslash escapes while still seeing wide characters as themselves.
+Every character occupies the same space with a fixed-width font, but
+the tiny "control picures" can be hard to read; 
+to see traditional \n etc.  while still seeing wide characters as themselves,
+set C<Useqq> to just "unicode";
 
 =item "spacedots"
 
@@ -1881,6 +2183,9 @@ rather than "...".
 
 =back
 
+The default is C<Useqq('unicode')> except for
+functions/methods with 'q' in their name, which force C<Useqq(0)>.
+
 =head2 Quotekeys
 
 =head2 Maxdepth
@@ -1888,6 +2193,8 @@ rather than "...".
 =head2 Maxrecurse
 
 =head2 Deparse
+
+=head2 Deepcopy
 
 See C<Data::Dumper> documentation.
 
@@ -1926,7 +2233,7 @@ as a special case to avoid ambiguity the string 'undef' is always "quoted".
 =head2 qshpath [$might_have_tilde_prefix]
 
 Similar to C<qsh> except that an initial ~ or ~username is left
-unquoted.  Useful for paths given to bash or csh.
+unquoted.  Useful with bash or csh.
 
 =head2 qshlist @items
 
@@ -1999,8 +2306,7 @@ Results differ from plain C<Data::Dumper> output in the following ways
 A final newline is I<never> included.
 
 Everything is shown on a single line if possible, otherwise wrapped to
-your terminal width (or C<$Foldwidth>) with indentation
-appropriate to structure levels.
+your terminal width (or C<$Foldwidth>), with indented structure levels.
 
 =item *
 
@@ -2013,15 +2319,14 @@ You'll also want C<< use utf8; >> if your Perl source
 contains characters outside the ASCII range.
 
 Undecoded binary octets (e.g. data read from a 'binmode' file)
-will still be escaped as individual bytes when necessary.
+will still be escaped as individual bytes.
 
 =item *
 
-Spaces·may·be·shown·visibly.
+Depending on options, spaces·may·be·shown·visibly
+and '␤' may be shown for newline (and similarly for other ASCII controls).
 
-=item *
-
-'␤' may be shown for newline, and similarly for other ASCII control characters.
+"White space" characters in qr/compiled regex/ are shown as \t, \n etc.
 
 =item *
 
@@ -2061,17 +2366,20 @@ they may be important when communicating to a human.
 
 Data::Dumper
 
+=head1 AUTHOR
+
 Jim Avera  (jim.avera AT gmail)
+
+=head1 LICENSE
+
+Public Domain or CC0.
 
 =for nobody Foldwidth1 is currently an undocumented experimental method
 =for nobody which sets a different fold width for the first line only.
-=for nobody
-=for nobody viso & visoq are also undocumented experimental
-=for nobody
-=for nobody oops is an internal function (called to die if bug detected).
-=for nobody
 =for nobody The Debug method is for author's debugging, and not documented.
+=for nobody
+=for nobody oops and btw btwN are internal debugging functions
 
-=for Pod::Coverage viso visoq Foldwidth1 oops Debug
+=for Pod::Coverage Foldwidth1 oops btw btwN Debug
 
 =cut

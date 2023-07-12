@@ -21,7 +21,8 @@
 #
 #   If @ARGV contains -d etc. those options are removed from @ARGV
 #   and the corresponding globals are set: $debug, $verbose, $silent
-#   (the globals are not exported by default).
+#   (the globals are not exported by default).  In addition, the
+#   hash %dvs is initialized with those values.
 #
 #   ':silent' captures stdout & stderr and dies at exit if anything was
 #      written (Test::More output and output via 'note'/'diag' excepted).
@@ -82,7 +83,7 @@ our @EXPORT = qw/silent
                  @quotes
                  string_to_tempfile
                 /;
-our @EXPORT_OK = qw/$debug $silent $verbose dprint dprintf/;
+our @EXPORT_OK = qw/$debug $silent $verbose %dvs dprint dprintf/;
 
 use Import::Into;
 use Data::Dumper;
@@ -96,16 +97,20 @@ sub bug(@) { @_=("BUG FOUND:",@_); goto &Carp::confess }
 
 # Parse manual-testing args from @ARGV
 my @orig_ARGV = @ARGV;
-our ($debug, $verbose, $silent, $nonrandom);
+our ($debug, $verbose, $silent, $nonrandom, %dvs);
 use Getopt::Long qw(GetOptions);
 Getopt::Long::Configure("pass_through");
 GetOptions(
   "d|debug"           => sub{ $debug=$verbose=1; $silent=0 },
-  "s|silent"          => \$silent,
+  "s|silent!"         => \$silent,
   "n|nonrandom"       => \$nonrandom,
   "v|verbose"         => \$verbose,
 ) or die "bad args";
 Getopt::Long::Configure("default");
+
+$dvs{debug}   = $debug   if defined($debug);
+$dvs{verbose} = $verbose if defined($verbose);
+$dvs{silent}  = $silent  if defined($silent);
 
 if ($nonrandom) {
   # This must run before Test::More or Test2::V0 is loaded!!
@@ -163,7 +168,15 @@ sub import {
   utf8->import::into($target);
 
   if (delete $tags{":silent"}) {
-    _start_silent() unless $debug;
+    if (defined($silent) && !$silent) {
+      warn ":silent tag ignored due to --no-silent option\n";
+    }
+    elsif ($debug) {
+      warn ":silent tag ignored due to --debug option\n";
+    }
+    else {
+      _start_silent();
+    }
   }
 
   die "Unhandled tag ",keys(%tags) if keys(%tags);
@@ -308,6 +321,9 @@ sub _start_silent() {
     return if $^S or !defined($^S);  # executing an eval, or Perl compiler
     my @diemsg = @_;
     my $err=_finish_silent(); warn $err if $err;
+
+    #@_ = @diemsg;
+    #goto &CORE::die;
     die @diemsg;
   };
 
