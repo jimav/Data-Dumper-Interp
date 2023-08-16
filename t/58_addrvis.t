@@ -168,9 +168,10 @@ fail("Unexpected ndigits change") if reget_addrvis;
 
 # Basic tests
 {
-  my $decchars = substr(sprintf("%09d",refaddr($aref)),-$addrvis_ndigits);
-  my $hexchars = substr(sprintf("%09x",refaddr($aref)),-$addrvis_ndigits);
-  is( addrvis($aref),  "ARRAY<${decchars}:${hexchars}>", "Basic addrvis(ref)");
+  my $decchars = substr(sprintf("%020d",refaddr($aref)),-$addrvis_ndigits);
+  my $hexchars = substr(sprintf("%020x",refaddr($aref)),-$addrvis_ndigits);
+  is( addrvis($aref),  "ARRAY<${decchars}:${hexchars}>", "Basic addrvis(ref)",
+      dvis('$addrvis_ndigits'));
   is( addrvis(refaddr $aref),
       "<${decchars}:${hexchars}>", "Basic addrvis(number)" );
   is( addrvisl($aref), "ARRAY ${decchars}:${hexchars}", "Basic addrvisl(ref)");
