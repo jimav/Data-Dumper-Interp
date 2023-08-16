@@ -55,13 +55,17 @@ use overload ();
 
 our @EXPORT    = qw( visnew
                      vis avis hvis ivis dvis
+                     viso aviso hviso iviso dviso
                      visq avisq hvisq ivisq dvisq
+                     visr avisr hvisr ivisr dvisr
                      rvis rvisq
                      addrvis addrvisl
                      u quotekey qsh qshlist qshpath
                    );
 
-our @EXPORT_OK = qw($Debug $MaxStringwidth $Truncsuffix $Objects $Foldwidth
+our @EXPORT_OK = qw(set_addrvis_digits
+
+                    $Debug $MaxStringwidth $Truncsuffix $Objects $Foldwidth
                     $Useqq $Quotekeys $Sortkeys
                     $Maxdepth $Maxrecurse $Deparse $Deepcopy);
 
@@ -291,11 +295,10 @@ around       [qw/Values Useqq Quotekeys Trailingcomma Pad Varname Quotekeys
 our $addrvis_ndigits = 3;
 our $addrvis_seen    = {};   # full (decimal) address => undef
 our $addrvis_dec_abbrs = {}; # abbreviated decimal digits => undef
-sub addrvis_forget(;$) {
-  $addrvis_ndigits   = $_[0] || 3;
-  $addrvis_seen      = {};
-  $addrvis_dec_abbrs = {};
-}
+sub _abbr_hex($) {
+  substr(sprintf("%0*x", $addrvis_ndigits, $_[0]), -$addrvis_ndigits) }
+sub _abbr_dec($) {
+  substr(sprintf("%0*d", $addrvis_ndigits, $_[0]), -$addrvis_ndigits) }
 sub addrvis(_) {
   my $arg = shift // return("undef");
   my $refstr = ref($arg);
@@ -306,31 +309,39 @@ sub addrvis(_) {
     carp("addrvis arg '$arg' is neither a ref or a number\n");
     return ""
   }
-  my sub abbr_hex($) {
-       substr(sprintf("%0*x", $addrvis_ndigits, $_[0]), -$addrvis_ndigits) }
-  my sub abbr_dec($) {
-       substr(sprintf("%0*d", $addrvis_ndigits, $_[0]), -$addrvis_ndigits) }
 
   if (! exists $addrvis_seen->{$addr}) {
-    my $dec_abbr = abbr_dec($addr);
+    my $dec_abbr = _abbr_dec($addr);
     while (exists $addrvis_dec_abbrs->{$dec_abbr}) {
       ++$addrvis_ndigits;
-      %$addrvis_dec_abbrs = map{ (abbr_dec($_) => undef) } keys %$addrvis_seen;
-      $dec_abbr = abbr_dec($addr);
+      %$addrvis_dec_abbrs = map{ (_abbr_dec($_) => undef) } keys %$addrvis_seen;
+      $dec_abbr = _abbr_dec($addr);
     }
     $addrvis_dec_abbrs->{$dec_abbr} = undef;
     $addrvis_seen->{$addr} = undef;
   }
-  #$refstr ne "" ? $refstr.'<'.abbr_dec($addr).':'.abbr_hex($addr).'>'
-  #              : abbr_dec($addr).':'.abbr_hex($addr)
-  $refstr.'<'.abbr_dec($addr).':'.abbr_hex($addr).'>'
+  #$refstr ne "" ? $refstr.'<'._abbr_dec($addr).':'._abbr_hex($addr).'>'
+  #              : _abbr_dec($addr).':'._abbr_hex($addr)
+  $refstr.'<'._abbr_dec($addr).':'._abbr_hex($addr).'>'
 }
 sub addrvisl(_) {
   # Return bare "hex:dec" or "Typename hex:dec"
   &addrvis =~ s/^([^\<]*)\<(.*)\>$/ $1 ? "$1 $2" : $2 /er or oops
 }
+sub set_addrvis_digits($) {
+  if ($_[0] <= $addrvis_ndigits) { 
+    return # can not decrease
+  }
+  $addrvis_ndigits   = $_[0];
+  %$addrvis_dec_abbrs = map{ (_abbr_dec($_) => undef) } keys %$addrvis_seen;
+}
+sub addrvis_forget() {
+  $addrvis_seen      = {};
+  $addrvis_dec_abbrs = {};
+  $addrvis_ndigits = 3;
+}
 
-=for Pod::Coverage addrvis_forget
+=for Pod::Coverage set_addrvis_digits addrvis_forget
 
 =cut
 
@@ -1139,7 +1150,7 @@ my %qqesc2controlpic = (
   '\t' => "\N{SYMBOL FOR HORIZONTAL TABULATION}",
 );
 my %char2controlpic = (
-  map{ 
+  map{
     my $cp = $qqesc2controlpic{$_};
     my $char = eval(qq("$_")) // die;
     die "XX<<$_>> YY<<$char>>" unless length($char) == 1;
@@ -1508,7 +1519,7 @@ sub _postprocess_DD_result {
           s/(?<!\\)\x{0D}/\\r/g;
           s/(?<!\\)\t/\\t/g;
         }
-      } 
+      }
       atom($_)
     }
     elsif (/\G${addrvis_re}/gsc)                 { atom($&, "prepend_to_next") }
@@ -1939,8 +1950,9 @@ For example C<visq> is like C<vis> but
 shows strings in single-quoted form (implied by the 'B<q>' suffix).
 
 There are no fixed function names; you can use any combination of
-characters in any order, prefixed or suffixed to the primary name;
-the function will be I<generated> when it is imported* or called as a method.
+characters in any order, prefixed or suffixed to the primary name
+with optional '_' separators.
+The function will be I<generated> when it is imported* or called as a method.
 
 The available modifier characters are:
 
@@ -2019,7 +2031,7 @@ Z<> Z<>
   use Data::Dumper::Interp qw/:all/;
 
 This generates and imports all possible variations (with NUMBER <= 2).
-that have suffix characters in alphabetical order.
+that have suffix characters in alphabetical order, without underscores.
 There are 119 variations, too many to remember.
 
 But you only really need to remember the five standard names
@@ -2035,7 +2047,8 @@ For example, one function is C<avis2lq>, which
  * Returns a comma-separated list *without* parenthesis ('l')
  * Shows strings in single-quoted form ('q')
 
-You could equally well have made up different names like C<avis2ql>, C<q2avisl> etc.
+You could equally well have made up different names like C<avis2ql>,
+C<q2avisl>, C<q_2_avis_l> etc.
 for the same function if you explicitly imported those alternate
 names or called them as methods.
 
@@ -2049,11 +2062,11 @@ prints messages as these events occur.
 
 =head2 addrvis REF_or_NUMBER
 
-This function returns a string showing an address in both decimal and 
+This function returns a string showing an address in both decimal and
 hexadecimal, but abbreviated to only the last few digits.
 
-The number of digits increases over time if necessary to keep new results
-unambiguous.
+The number of digits starts at 3 and increases over time if necessary 
+to keep new results unambiguous. 
 
 For REFs, the result is like I<< "HASHE<lt>457:1c9E<gt>" >>
 or, for blessed objects, I<< "Package::NameE<lt>457:1c9E<gt>" >>.
@@ -2061,9 +2074,11 @@ or, for blessed objects, I<< "Package::NameE<lt>457:1c9E<gt>" >>.
 If the argument is a plain number, just the abbreviated decimal:hex address
 is returned, e.g. I<< "E<lt>457:1c9E<gt>" >>.
 
-I<"undef"> is returned if the argument is undefined.
-
+I<"undef"> is returned if the argument is undefined.  
 Croaks if the argument is defined but not a ref.
+
+C<set_addrvis_digits(NUMBER)> forces a minimum width 
+and C<addrvis_forget()> discards past values and resets to 3 digits.
 
 =head2 addrvisl REF_or_NUMBER
 
@@ -2092,6 +2107,10 @@ returns the same string as
 
    local $Data::Dumper::Interp::Foldwidth = 40;
    $msg = avis @ARGV;
+
+Any "variation" can be called, for example
+
+   $msg = visnew->vis_r2($x); # show addresses; Maxdepth 2
 
 =head1 Configuration Variables / Methods
 
@@ -2166,7 +2185,7 @@ Show ASCII control characters using single "control picture" characters:
 similarly ␀ ␇ ␈ ␛ ␌ ␍ ␉ for \0 \a \b \e \f \r \t.
 
 Every character occupies the same space with a fixed-width font, but
-the tiny "control picures" can be hard to read; 
+the tiny "control picures" can be hard to read;
 to see traditional \n etc.  while still seeing wide characters as themselves,
 set C<Useqq> to just "unicode";
 

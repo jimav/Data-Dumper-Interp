@@ -1,5 +1,7 @@
 (Recent) Revision history for Perl extension Data-Dumper-Interp
 
+6.001 - Added set_addrvis_digits() & addrvis_forget()
+
 6.000 - 1. Option Refaddr() added to show abbreviated ref addresses.
 
         2. Shortcut function/method names can now include 'r' to imply

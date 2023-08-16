@@ -21,12 +21,31 @@ use strict; use warnings  FATAL => 'all'; use feature qw/say state/;
 require Exporter;
 use parent 'Exporter';
 our @EXPORT = qw/mytempfile mytempdir/;
-our @EXPORT_OK = qw/oops/;
+our @EXPORT_OK = qw/oops btw btwN/;
 
 use Import::Into;
 use Carp;
 
-sub oops(@) { @_=("oops! ",@_); goto &Carp::confess }
+sub oops(@) { 
+  my $pkg = caller;
+  my $pfx = "\n"; 
+  $pfx .= "$pkg " if $pkg ne 'main';
+  $pfx .= "oops:\n";
+  @_ = ($pfx, @_, "\n");
+  goto &Carp::confess
+}
+
+# "By The Way" messages showing file:linenum of the call
+sub btw(@) { unshift @_,0; goto &btwN }
+sub btwN($@) { 
+  my $N=shift; 
+  my ($fn, $lno) = (caller($N))[1,2];
+  $fn =~ s/.*[\\\/]//;  
+  $fn =~ s/(.)\.[a-z]+$/$1/a;
+  local $_ = join("",@_); 
+  s/\n\z//s; 
+  printf "%s:%d: %s\n", $fn, $lno, $_;
+}
 
 sub import {
   my $target = caller;
@@ -123,10 +142,11 @@ sub import {
   require Guard;
   Guard->import::into($target, qw(scope_guard guard));
 
-  use Data::Dumper::Interp 5.030 (); # 5.030 has new rvis etc.
+  use Data::Dumper::Interp 6.001 (); # use rather than require for dist zilla 
   unless (Cwd::abs_path(__FILE__) =~ /Data-Dumper-Interp/) {
-    # unless we are testing this
-    Data::Dumper::Interp->import::into($target);
+    # unless we are testing DDI
+    Data::Dumper::Interp->import::into($target,
+                                       qw/:DEFAULT rdvis rvis set_addrvis_digits/);
     $Data::Dumper::Interp::Useqq = 'unicode'; # omit 'controlpic' to get \t etc.
   }
 

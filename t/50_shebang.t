@@ -4,7 +4,7 @@
 our $test_sub;
 BEGIN {
   # WHY???  It must be something in Perl which otherwise
-  # is not suppressed, triggering out warning trap error.
+  # is not suppressed, triggering our __WARNING__ trap error.
   local ${^WARNING_BITS} = 0; # undo -w flag
   $test_sub = sub{ my $x = 42; };
 }

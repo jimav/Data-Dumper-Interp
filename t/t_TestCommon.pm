@@ -4,17 +4,18 @@
 # related or neighboring rights to the content of this file.
 # Attribution is requested but is not required.
 
+# NO use strict; use warnings here to avoid conflict with t_Common which sets them
+
 # t_TestCommon -- setup and tools specifically for tests.
 #
-#   Everything not specifically test-related is in the separate
-#   module t_Common (which is not necessairly just for tests).
+#   This file is intended to be identical in all my module distributions.
 #
 #   Loads Test2::V0 (except with ":no-Test2"), which sets UTF-8 enc/dec
-#   for test-harnes streams (but *not* STD* or new filehandles).
-#
-#   Imports 'utf8' so scripts can be written in UTF-8 encoding
+#   for test-harness streams (but *not* STD* or new filehandles).
 #
 #   Makes STDIN, STDOUT & STDERR UTF-8 auto de/encode
+#
+#   Imports 'utf8' so scripts can be written in UTF-8 encoding
 #
 #   warnings are *not* imported, to avoid clobbering 'no warnings ...'
 #   settings done beforehand (e.g. via t_Common).
@@ -29,12 +30,12 @@
 #      Note: Currently incompatible with Capture::Tiny !
 #
 #   Exports various utilites & wrappers for ok() and like()
-
-# This file is intended to be identical in all my module distributions.
+#
+#   Everything not specifically test-related is in the separate
+#   module t_Common (which is not necessairly just for tests).
 
 package t_TestCommon;
 
-# NO use strict/warnings here to avoid conflict with t_Common which sets them
 use t_Common qw/oops mytempfile mytempdir/;
 
 use v5.16; # must have PerlIO for in-memory files for ':silent';
@@ -82,16 +83,24 @@ our @EXPORT = qw/silent
                  run_perlscript
                  @quotes
                  string_to_tempfile
+                 tmpcopy_if_writeable 
                 /;
 our @EXPORT_OK = qw/$debug $silent $verbose %dvs dprint dprintf/;
 
 use Import::Into;
 use Data::Dumper;
-# Do *not* load Data::Dumper::Interp (because we might be testing it...)
+
+unless (Cwd::abs_path(__FILE__) =~ /Data-Dumper-Interp/) {
+  # unless we are testing DDI
+  #$Data::Dumper::Interp::Foldwidth = undef; # use terminal width
+  $Data::Dumper::Interp::Useqq = "controlpics:unicode";
+}
+
 use Cwd qw/getcwd abs_path/;
 use POSIX qw/INT_MAX/;
 use File::Basename qw/dirname/;
 use Env qw/@PATH @PERL5LIB/;  # ties @PATH, @PERL5LIB
+use Config;
 
 sub bug(@) { @_=("BUG FOUND:",@_); goto &Carp::confess }
 
@@ -102,7 +111,7 @@ use Getopt::Long qw(GetOptions);
 Getopt::Long::Configure("pass_through");
 GetOptions(
   "d|debug"           => sub{ $debug=$verbose=1; $silent=0 },
-  "s|silent!"         => \$silent,
+  "s|silent"          => \$silent,
   "n|nonrandom"       => \$nonrandom,
   "v|verbose"         => \$verbose,
 ) or die "bad args";
@@ -129,7 +138,8 @@ if ($nonrandom) {
     $ENV{PERL_HASH_SEED} = "0xDEADBEEF";
     #$ENV{PERL_HASH_SEED_DEBUG} = "1";
     @PERL5LIB = @INC; # cf 'use Env' above
-    exec $^X, $0, @orig_ARGV; # for reproducible results
+    # https://web.archive.org/web/20160308025634/http://wiki.cpantesters.org/wiki/cpanauthornotes
+    exec $Config{perlpath}, $0, @orig_ARGV; # for reproducible results
   }
 }
 
@@ -168,15 +178,7 @@ sub import {
   utf8->import::into($target);
 
   if (delete $tags{":silent"}) {
-    if (defined($silent) && !$silent) {
-      warn ":silent tag ignored due to --no-silent option\n";
-    }
-    elsif ($debug) {
-      warn ":silent tag ignored due to --debug option\n";
-    }
-    else {
-      _start_silent();
-    }
+    _start_silent() unless $debug;
   }
 
   die "Unhandled tag ",keys(%tags) if keys(%tags);
@@ -321,9 +323,6 @@ sub _start_silent() {
     return if $^S or !defined($^S);  # executing an eval, or Perl compiler
     my @diemsg = @_;
     my $err=_finish_silent(); warn $err if $err;
-
-    #@_ = @diemsg;
-    #goto &CORE::die;
     die @diemsg;
   };
 
@@ -732,6 +731,21 @@ sub timed_run(&$@) {
   confess "TOOK TOO LONG ($cpusecs CPU seconds vs. limit of $maxcpusecs)\n"
     if $cpusecs > $maxcpusecs;
   if (wantarray) {return @result} else {return $result};
+}
+
+# Copy a file if needed to prevent any possibilty of it being modified.
+# Returns the original path if the file is read-only, otherwise the path
+# of a temp copy.
+sub tmpcopy_if_writeable($) {
+  my $path = shift;
+  if ( (stat($path))[2] & 0222 ) {
+    my ($name, $suf) = (basename($path) =~ /^(.*?)((?:\.\w{1,4})?)$/);
+    (undef, my $tpath) = 
+      File::Temp::tempfile(SUFFIX => $suf, UNLINK => 1);
+    File::Copy::copy($path, $tpath) or die "File::Copy $!";
+    return $tpath;
+  }
+  $path
 }
 
 1;
