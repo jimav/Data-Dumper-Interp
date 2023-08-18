@@ -75,6 +75,30 @@ our %EXPORT_TAGS = (
 
 sub _generate_sub($;$); # forward
 
+#---------------------------------------------------------------------------
+my $sane_cW = $^W;
+my $sane_cH = $^H;
+our @save_stack;
+sub _SaveAndResetPunct() {
+  # Save things which will later be restored
+  push @save_stack, [ $@, $!+0, $^E+0, $,, $/, $\, $?, $^W ];
+  # Reset sane values
+  $,  = "";       # output field separator is null string
+  $/  = "\n";     # input record separator is newline
+  $\  = "";       # output record separator is null string
+  $?  = 0;        # child process exit status
+  $^W = $sane_cW; # our load-time warnings
+  #$^H = $sane_cH; # our load-time pragmas (strict etc.)
+}
+sub _RestorePunct_NoPop() {
+  ( $@, $!, $^E, $,, $/, $\, $?, $^W ) = @{ $save_stack[-1] };
+}
+sub _RestorePunct() {
+  &_RestorePunct_NoPop;
+  pop @save_stack;
+}
+#---------------------------------------------------------------------------
+
 our $AUTOLOAD_debug;
 
 sub import {
@@ -137,11 +161,12 @@ sub import {
 
 sub AUTOLOAD {  # invoked on call to undefined *method*
   our $AUTOLOAD;
-  # TODO: oops un
+  _SaveAndResetPunct();
   our $Debug;
   local $Debug = $AUTOLOAD_debug;
   carp "AUTOLOAD $AUTOLOAD" if $Debug;
   _generate_sub($AUTOLOAD);
+  _RestorePunct();
   no strict 'refs';
   goto &$AUTOLOAD;
 }
@@ -150,7 +175,7 @@ sub AUTOLOAD {  # invoked on call to undefined *method*
 ############################################################################
 # Internal debug-message utilities
 
-sub oops(@) { @_=("\n".__PACKAGE__." oops:\n",@_,"\n"); goto &Carp::confess }
+sub oops(@) { @_=("\n".(caller)." oops:\n",@_,"\n"); goto &Carp::confess }
 sub btwN($@) { my $N=shift; local $_=join("",@_); s/\n\z//s; printf "%4d: %s\n",(caller($N))[2],$_; }
 sub btw(@) { unshift @_,0; goto &btwN }
 
@@ -394,30 +419,6 @@ sub qshpath(_) {  # like qsh but does not quote initial ~ or ~username
 
 # Should this have been called 'aqsh' ?
 sub qshlist(@) { join " ", map{qsh} @_ }
-
-#---------------------------------------------------------------------------
-
-my $sane_cW = $^W;
-my $sane_cH = $^H;
-our @save_stack;
-sub _SaveAndResetPunct() {
-  # Save things which will later be restored
-  push @save_stack, [ $@, $!+0, $^E+0, $,, $/, $\, $?, $^W ];
-  # Reset sane values
-  $,  = "";       # output field separator is null string
-  $/  = "\n";     # input record separator is newline
-  $\  = "";       # output record separator is null string
-  $?  = 0;        # child process exit status
-  $^W = $sane_cW; # our load-time warnings
-  #$^H = $sane_cH; # our load-time pragmas (strict etc.)
-}
-sub _RestorePunct_NoPop() {
-  ( $@, $!, $^E, $,, $/, $\, $?, $^W ) = @{ $save_stack[-1] };
-}
-sub _RestorePunct() {
-  &_RestorePunct_NoPop;
-  pop @save_stack;
-}
 
 ########### Subs callable as either a Function or Method #############
 

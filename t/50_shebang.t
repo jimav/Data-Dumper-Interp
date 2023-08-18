@@ -14,6 +14,7 @@ use lib $Bin;
 use t_Common ; # strict, warnings, Carp
 use t_TestCommon ':silent', # Test2::V0 etc.
                  qw/bug displaystr fmt_codestring timed_run 
+                    rawstr showstr showcontrols
                     mycheckeq_literal mycheck @quotes/;
 
 sub oops(@) {
