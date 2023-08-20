@@ -28,10 +28,10 @@ sub expstr2re($) {
 # Check that AUTOLOAD does not change punctuation variables
 { my @varnames = split / /, '@ ! ^E , / \\ ? ^W';
   local ($@, $/, $\, $,, $!, $^E, $^W)
-    = ("fakeAt","fakeFs","fakeBs","fakeCom",42,43,7);
-  my %before = map{ no strict 'refs'; $_ => ${$_} } @varnames;
-  () = (vis($@), dvis '$@', visnew->rivisq('$@'));
-  my %after  = map{ no strict 'refs'; $_ => ${$_} } @varnames;
+    = ("fakeAt","fakeInRecSep","fakeOutRecSep","fakeCom",13,13,1); # $^W can only be 0 or 1
+  my %before = map{ do{no strict 'refs'; $_ => ${$_} } } @varnames;
+  () = (vis($@), dvis '$@', visnew->rivisq42('$@'));
+  my %after  = map{ do{no strict 'refs'; $_ => ${$_} } } @varnames;
   foreach my $vn (@varnames) {
     fail("\$$vn was corrupted") unless u($before{$vn}) eq u($after{$vn});
   }

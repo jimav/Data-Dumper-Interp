@@ -176,7 +176,7 @@ foreach (
                           \$obj->$codestr ;   # discard dump result
                           \$obj->$confname()  # fetch effective setting
                         }";
-        confess("bug:@_ ") if $@;
+        confess("bug:$@ ") if $@;
         confess("\$Data::Dumper::Interp::$confname value is not preserved by $codestr\n",
             "(Set \$Data::Dumper::Interp::$confname=",u($value)," but new()...->$confname() returned ",u($v),")\n")
           unless (! defined($v) and ! defined($value))
