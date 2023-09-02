@@ -42,7 +42,7 @@ use Data::Dumper ();
 use Carp;
 use POSIX qw(INT_MAX);
 use Scalar::Util qw(blessed reftype refaddr looks_like_number weaken);
-use List::Util 1.33 qw(min max first none all any sum0 uniqstr);
+use List::Util 1.45 qw(min max first none all any sum0);
 use Data::Structure::Util qw/circular_off/;
 use Regexp::Common qw/RE_balanced/;
 use Term::ReadKey ();
