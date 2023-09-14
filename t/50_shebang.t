@@ -173,7 +173,7 @@ foreach (
         {
           my $v = eval "{ local \$Data::Dumper::Interp::$confname = \$value;
                           my \$obj = Data::Dumper::Interp->new();
-                          \$obj->$codestr ;   # discard dump result
+                          () = \$obj->$codestr ;   # discard dump result
                           \$obj->$confname()  # fetch effective setting
                         }";
         confess("bug:$@ ") if $@;
@@ -333,13 +333,13 @@ if ($^O eq "MSWin32") {
 
 # Check that $1 etc. can be passed (this was once a bug...)
 # The duplicated calls are to check that $1 is preserved
-{ my $code = '" a~b" =~ / (.*)()/ && qsh($1); oops unless $1 eq "a~b";qsh($1)';
+{ my $code = '" a~b" =~ / (.*)()/ && qsh($1) && ($1 eq "a~b") && qsh($1)';
   mycheck $code, '"a~b"', eval $code; }
-{ my $code = '" a~b" =~ / (.*)()/ && qshpath($1); oops unless $1 eq "a~b";qshpath($1)';
+{ my $code = '" a~b" =~ / (.*)()/ && qshpath($1) && ($1 eq "a~b") && qshpath($1)';
   mycheck $code, '"a~b"', eval $code; }
-{ my $code = '" a~b" =~ / (.*)()/ && vis($1); oops unless $1 eq "a~b";vis($1)';
+{ my $code = '" a~b" =~ / (.*)()/ && vis($1) && ($1 eq "a~b") && vis($1)';
   mycheck $code, '"a~b"', eval $code; }
-{ my $code = 'my $vv=123; \' a $vv b\' =~ / (.*)/ && dvis($1); oops unless $1 eq "a \$vv b"; dvis($1)';
+{ my $code = 'my $vv=123; \' a $vv b\' =~ / (.*)/ && dvis($1) && ($1 eq "a \$vv b") && dvis($1)';
   mycheck $code, 'a vv=123 b', eval $code; }
 
 # Check Deparse support

@@ -179,10 +179,18 @@ sub oops(@) { @_=("\n".(caller)." oops:\n",@_,"\n"); goto &Carp::confess }
 sub btwN($@) { my $N=shift; local $_=join("",@_); s/\n\z//s; printf "%4d: %s\n",(caller($N))[2],$_; }
 sub btw(@) { unshift @_,0; goto &btwN }
 
-sub __chop_loc($) {  # remove "at ..." from an exception message
+sub _chop_ateval($) {  # remove "at (eval N) line..." from an exception message
   (local $_ = shift) =~ s/ at \(eval[^\)]*\) line \d+[^\n]*\n?\z//s;
   $_
 }
+sub _croak_or_confess(@) {
+  # Chain to croak, or to confess if there is an eval in the call stack
+  if (Carp::longmess("") =~ /\beval\b/) {
+    goto &Carp::confess;
+  }
+  goto &Carp::croak;
+}
+
 sub _tf($) { $_[0] ? "T" : "F" }
 sub _showfalse(_) { $_[0] ? $_[0] : 0 }
 sub _dbvisnew($) {
@@ -427,7 +435,7 @@ sub qshlist(@) { join " ", map{qsh} @_ }
 sub __getself { # Return $self if passed or else create a new object
   local $@;
   my $blessed = eval{ blessed($_[0]) }; # In case a tie handler throws
-  croak __chop_loc($@) if $@;
+  croak _chop_ateval($@) if $@;
   $blessed && $_[0]->isa(__PACKAGE__) ? shift : __PACKAGE__->new()
 }
 sub __getself_s { &__getself->Values([$_[0]]) }
@@ -451,7 +459,7 @@ sub _generate_sub($;$) {
   my ($arg, $proto_only) = @_;
   (my $methname = $arg) =~ s/.*:://;
   my sub error($) {
-    confess "Invalid sub/method name '$methname' (@_)\n"
+    _croak_or_confess "Invalid sub/method name '$methname' (@_)\n"
   }
 
   # Method names are ivis, dvis, vis, avis, or hvis with prepended
@@ -621,6 +629,9 @@ sub _Do {
   my $original = $orig_values[0];
   btw "##ORIGINAL=",u($original),"=",_dbvis($original) if $debug;
 
+  _croak_or_confess "*vis($original) called in void context.\nDid you forget to 'say ...'?"
+    if ! defined wantarray;
+
   # Allow one extra level if we wrapped the user's args in __getself_[ah]
   $my_maxdepth = $self->Maxdepth || INT_MAX;
   ++$my_maxdepth if $listform && $my_maxdepth < INT_MAX;
@@ -635,7 +646,7 @@ sub _Do {
   # maximally-compact string, and then manually fold the result to Foldwidth,
   # inserting the user's Pad before each line *except* the first.
   #
-  # Also disable Maxdepth because we did it ourself (see visit_ref).
+  # Also disable Maxdepth because we handle that ourself (see visit_ref).
   my $users_Maxdepth = $self->Maxdepth; # implemented by D::D
   $self->Maxdepth(0);
   my $users_pad = $self->Pad();
@@ -1640,6 +1651,9 @@ sub _postprocess_DD_result {
 
 sub _Interpolate {
   my ($self, $input, $i_or_d) = @_;
+  _croak_or_confess $i_or_d."vis('$input') called in void context.\nDid you forget to 'say ...'?"
+    unless defined wantarray;
+
   return "<undef arg>" if ! defined $input;
 
   &_SaveAndResetPunct;
@@ -1838,14 +1852,15 @@ sub DB_Vis_Eval($$) {
      .' @Data::Dumper::Interp::result = '.$evalarg.';'
      .' $Data::Dumper::Interp::save_stack[-1]->[0] = $@;' # possibly changed by a tie handler
      ;
+     ###??? FIXME why is DB_Vis_Evalwrapper needed?  Lexical scope?
      &DB_Vis_Evalwrapper;
      @Data::Dumper::Interp::result
   };
   my $errmsg = $@;
 
   if ($errmsg) {
-    $errmsg = Data::Dumper::Interp::__chop_loc($errmsg);
-    Carp::carp("${label_for_errmsg}: Error interpolating '$evalarg':\n$errmsg\n");
+    $errmsg = Data::Dumper::Interp::_chop_ateval($errmsg);
+    Carp::carp("${label_for_errmsg} interpolation error: $errmsg\n");
     @result = ( (defined($result[0]) ? $result[0] : "")."<invalid/error>" );
   }
 
