@@ -484,7 +484,7 @@ sub _generate_sub($;$) {
   if ($basename =~ /^[id]/) {
     error "'$1' is inapplicable to $basename" if /([ahl])/;
   }
-  error "'$1' mis-placed: Only allowed as '${1}vis'" if /([ahid])/;
+  error "'$1' mis-placed: Only allowed as '${1}vis'" if /([ahi])/;
 
 
   # All these subs can be called as either or methods or functions.
@@ -527,6 +527,7 @@ sub _generate_sub($;$) {
     $code .= '->Useqq(0)'     if delete $mod{q};
     $code .= '->Useqq("unicode:controlpics")' if delete $mod{c};
     $code .= '->Refaddr(1)'   if delete $mod{r};
+    $code .= '->Debug(2)'     if delete $mod{d};
 
     if ($basename =~ /^([id])vis/) {
       $code .= ", shift, '$1' ); goto &_Interpolate }";
@@ -1666,7 +1667,7 @@ sub _Interpolate {
 
   my @pieces;  # list of [visfuncname or 'p' or 'e', inputstring]
   { local $_ = $input;
-    if (/\b((?:ARRAY|HASH)\(0x[a-fA-F0-9]+\))/) {
+    if (/\b((?:ARRAY|HASH|SCALAR)\(0x[a-fA-F0-9]+\))/) {
       state $warned=0;
       carp("Warning: String passed to $funcname may have been interpolated by Perl\n(use 'single quotes' to avoid this)\n") unless $warned++;
     }
@@ -1718,7 +1719,7 @@ sub _Interpolate {
         if ($i_or_d eq 'd') {
           # Inject a "plain text" fragment containing the "expr=" prefix,
           # omitting the '$' sigl if the expr is a plain '$name'.
-          push @pieces, ['p', (/^\$(?!_)(${userident_re})\z/ ? $1 : $_)."="];
+          push @pieces, ['P', (/^\$(?!_)(${userident_re})\z/ ? $1 : $_)."="];
         }
         if ($sigl eq '$') {
           push @pieces, ["vis", $_];
@@ -1729,13 +1730,16 @@ sub _Interpolate {
         elsif ($sigl eq '%') {
           push @pieces, ["hvis", $_];
         }
-        else { confess "BUG:sigl='$sigl'"; }
-      } else {
-        if (/^.+?(?<!\\)([\$\@\%])/) { confess __PACKAGE__." bug: Missed '$1' in «$_»" }
+        else { oops }
+      }
+      else {
+        if (/^.+?(?<!\\)([\$\@\%])/) {
+          confess __PACKAGE__." bug: Missed '$1' in «$_»"
+        }
         # Due to the need to simplify the big regexp above, \x{abcd} is now
         # split into "\x" and "{abcd}".  Combine consecutive pass-thrus
-        # into a single passthru ('p') and convert later to 'e' if
-        # an eval if needed.
+        # into a single passthru ('p'), converted later to 'e' if an eval
+        # is needed.
         if (@pieces && $pieces[-1]->[0] eq 'p') {
           $pieces[-1]->[1] .= $_;
         } else {
@@ -1758,11 +1762,38 @@ sub _Interpolate {
     }
     foreach (@pieces) {
       my ($meth, $str) = @$_;
-      next unless $meth eq 'p' && $str =~ /\\[abtnfrexXN0-7]/;
-      $str =~ s/([()\$\@\%])/\\$1/g;  # don't hide \-escapes to be interpolated!
-      $str =~ s/\$\\/\$\\\\/g;
-      $_->[1] = "qq(" . $str . ")";
-      $_->[0] = 'e';
+      # If the user uses 'single quoted' strings then backslash escapes
+      # can not be emulated exactly as they would work in double-quoted strings
+      # because \ is inconsistently passed through, namely only when not
+      # followed by another backslash (or a quote character).
+      #   say ivis '\015';   # octal escape for CR intended?
+      #   say ivis '\\015';  # four literal characters \015 intended?
+      # We can not tell the difference because we get \015 in both cases.
+      #
+      # Currently we interpolate all \-escapes we see, so to get a literal
+      # backslash users must double them, e.g.
+      #   say ivis 'The four char escape sequence \\\\015 produces \015';
+      # Here-docs do not treat \ specially and so avoid this problem:
+      #   say ivis <<\END;
+      #   The four char escape sequence \\015 produces \015
+      #   END
+      #
+      # 0/18/23: Now really *all* \-escapes are interpolated, so this works:
+      #   say ivis '\$foo = $foo'   # $foo = <value>
+
+      #next unless $meth eq 'p' && $str =~ /\\[abtnfrexXN0-7]/;
+      #$str =~ s/([()\$\@\%])/\\$1/g;  # dont hide \-escapes to be interpolated!
+
+      if ($meth eq 'p') {
+        if ($str =~ /\\./) {
+          $str =~ s/\$\\/\$\\\\/g;   # Assume the punct var $\ is not intended
+          $_->[1] = "qq(" . $str . ")";
+          $_->[0] = 'e';
+        }
+      }
+      elsif ($meth eq 'P') {
+          $_->[0] = 'p';
+      }
     }
   } #local $_
 
@@ -1785,6 +1816,7 @@ sub DB_Vis_Interpolate {
   my $result = "";
   foreach my $p (@$pieces) {
     my ($methname, $arg) = @$p;
+#say "III methname=$methname arg='$arg'";
     if ($methname eq 'p') {
       $result .= $arg;
     }
