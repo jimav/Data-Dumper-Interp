@@ -599,7 +599,7 @@ use constant _UNIQUE => substr(refaddr \&oops,-5);
 use constant {
   _MAGIC_NOQUOTES_PFX   => "|NQMagic${\_UNIQUE}|",
   _MAGIC_KEEPQUOTES_PFX => "|KQMagic${\_UNIQUE}|",
-  _MAGIC_REFADDR        => "|RAMagic${\_UNIQUE}|",
+  _MAGIC_REFPFX         => "|RPMagic${\_UNIQUE}|",
   _MAGIC_ELIDE_NEXT     => "|ENMagic${\_UNIQUE}|",
 };
 
@@ -680,15 +680,41 @@ sub _Do {
   $our_result;
 }
 
-#---------------------------------------------------------------------
-# methods called from Data::Visitor when transforming the input
+#----------------------------------------------------------------------------
+# methods called from Data::Visitor (and helpers) when transforming the input
+
+our $in_overload_replacement = 0;
+
+sub _prefix_refaddr($;$) {
+  my ($item, $original) = @_;
+  # If enabled by Refaddr(true):
+  #
+  # Prefix (the formatted representation of) a ref with it's abbreviated
+  # address.  This is done by wrapping the ref in a temporary [array] with the
+  # prefix, and unwrapping the Data::Dumper result in _postprocess_DD_result().
+  return $item
+    unless $opt_refaddr
+           && ! $in_overload_replacement
+           && ($listform ? ($my_visit_depth > 0) # Not on our argument container
+                         : 1);                   # Else always if not a (list)
+  my $pfx = addrvis(refaddr($original//$item));
+  my $ix = index($item,$pfx);
+say "_prefix_refaddr: ior=$in_overload_replacement pfx=$pfx ix=$ix original=",_dbvis1($original)," item=$item" if $debug;
+  # However don't do this if $item already has an addrvis() substituted,
+  # which happens if an object does not stringify or provide another overload
+  # replacement -- see _object_subst().
+  return $item if $ix >= 0;
+  $item = [ _MAGIC_REFPFX.$pfx, $item, _MAGIC_ELIDE_NEXT ];
+  btwN 1, '@@@addrvis-prefixed object:',_dbvis2($item) if $debug;
+  $item
+}#_prefix_refaddr
 
 sub _object_subst($) {
   my $item = shift;
   my $overload_depth;
   CHECKObject: {
     if (my $class = blessed($item)) {
-btw '@@@repl item is obj, class=',$class if $debug;
+btw '@@@repl item is obj ',$item if $debug;
       my $enabled;
       OSPEC:
       foreach my $ospec (@$objects) {
@@ -708,7 +734,7 @@ btw '@@@repl item is obj, class=',$class if $debug;
       last CHECKObject
         unless $enabled;
       if (overload::Overloaded($item)) {
-btw '@@@repl item is overloaded ',$class,' obj' if $debug;
+btw '@@@repl obj is overloaded' if $debug;
         # N.B. Overloaded(...) also returns true if it's a NAME of an
         # overloaded package; should not happen in this case.
         warn("Recursive overloads on $item ?\n"),last
@@ -727,28 +753,34 @@ btw '@@@repl stringified:',$item if $debug;
           redo CHECKObject;
         }
         # Substitute the virtual value behind an overloaded deref operator
+        # and prefix with (classname) to make clear what happened.
         if (overload::Method($class,'@{}')) {
-          $item = \@{ $item };
+          #$item = \@{ $item };
+          $item = [ _MAGIC_REFPFX."($class)", \@{ $item }, _MAGIC_ELIDE_NEXT ];
 btw '@@@repl (overload @{} --> ', $item,')' if $debug;
           redo CHECKObject;
         }
         if (overload::Method($class,'%{}')) {
-          $item = \%{ $item };
+          #$item = \%{ $item };
+          $item = [ _MAGIC_REFPFX."($class)", \%{ $item }, _MAGIC_ELIDE_NEXT ];
 btw '@@@repl (overload %{} --> ', $item,')' if $debug;
           redo CHECKObject;
         }
         if (overload::Method($class,'${}')) {
-          $item = \${ $item };
+          #$item = \${ $item };
+          $item = [ _MAGIC_REFPFX."($class)", \${ $item }, _MAGIC_ELIDE_NEXT ];
 btw '@@@repl (overload ${} --> ', $item,')' if $debug;
           redo CHECKObject;
         }
         if (overload::Method($class,'&{}')) {
-          $item = \&{ $item };
+          #$item = \&{ $item };
+          $item = [ _MAGIC_REFPFX."($class)", \&{ $item }, _MAGIC_ELIDE_NEXT ];
 btw '@@@repl (overload &{} --> ', $item,')' if $debug;
           redo CHECKObject;
         }
         if (overload::Method($class,'*{}')) {
-          $item = \*{ $item };
+          #$item = \*{ $item };
+          $item = [ _MAGIC_REFPFX."($class)", \*{ $item }, _MAGIC_ELIDE_NEXT ];
 btw '@@@repl (overload *{} --> ', $item,')' if $debug;
           redo CHECKObject;
         }
@@ -820,28 +852,6 @@ sub visit_hash_key {
   return $item; # don't truncate or otherwise munge
 }
 
-sub _prefix_refaddr($;$) {
-  my ($item, $original) = @_;
-  # If enabled by Refaddr(true):
-  #
-  # Prefix (the formatted representation of) a ref with it's abbreviated
-  # address.  This is done by wrapping the ref in a temporary [array] with the
-  # prefix, and unwrapping the Data::Dumper result in _postprocess_DD_result().
-  #
-  # However don't do this if $item already has an addrvis() substituted,
-  # which happens if an object does not stringify or provide another overload
-  # replacement -- see _object_subst().
-  return $item
-    unless $opt_refaddr && (!$listform || $my_visit_depth > 0);
-  my $pfx = addrvis(refaddr($original//$item));
-  my $ix = index($item,$pfx);
-say "_prefix_refaddr: pfx=$pfx ix=$ix original=",_dbvis1($original)," item=$item" if $debug;
-  return $item if $ix >= 0;
-  $item = [ _MAGIC_REFADDR.$pfx, $item, _MAGIC_ELIDE_NEXT, ];
-  btwN 1, '@@@addrvis-prefixed object:',_dbvis2($item) if $debug;
-  $item
-}#_prefix_refaddr
-
 sub visit_object {
   my $self = shift;
   my $item = shift;
@@ -856,16 +866,18 @@ sub visit_object {
 
   # First register the ref (to detect duplicates); this calls visit_seen()
   # which usually substitutes something.
-  my $nitem = $self->SUPER::visit_object($item);
-  # Do not compare object refs with != in case that op is not defined
-  if (u(refaddr($nitem)) ne u(refaddr($item))) {
-    #say "!     (obj) new: ",_dbvis1($item), " --> ",_dbrvis2($nitem) if $debug;
-    say "!     (obj) new: $item --> $nitem" if $debug;
-    $item = $nitem;
-    # Re-visit the replacement item, which might contain inner structure
-    $nitem = $self->SUPER::visit($item);
-    say "!     (obj) recursion on repl: $item --> $nitem" if $debug;
-    $item = $nitem;
+  { # Suppress Refaddr treatment of the results of any overloads
+    local $in_overload_replacement = $in_overload_replacement + 1;
+    my $nitem = $self->SUPER::visit_object($item);
+    # Can compare object refs with != in case that op is not defined!
+    if (u(refaddr($nitem)) ne u(refaddr($item))) {
+      say "!     (obj) new: $item --> ",_dbvis2($nitem) if $debug;
+      $item = $nitem;
+      # Re-visit the replacement item, which might contain inner structure.
+      $nitem = $self->SUPER::visit($item);
+      say "!     (obj) recursion on repl: $item --> $nitem" if $debug;
+      $item = $nitem;
+    }
   }
   $item = _prefix_refaddr($item, $original);
   $item
@@ -1562,16 +1574,24 @@ sub _postprocess_DD_result {
     }
   }#expand_children
 
-  # Remove the magic wrapper created by _prefix_refaddr().  The original $ref
-  # was replaced by
+  # Remove the [array wrapper] used to prepend a string to the
+  # representation of a ref, e.g. as created by _prefix_refaddr().
   #
-  #    [ _MAGIC_REFADDR.addrvis($ref), $ref, _MAGIC_ELIDE_NEXT, ];
+  # The original $ref was replaced by
   #
-  # Data::Dumper formatted the magic* items as "quoted strings"
+  #    [ _MAGIC_REFPFX."prefix", $ref, _MAGIC_ELIDE_NEXT ];
   #
-  s/\[\s*(["'])\Q${\_MAGIC_REFADDR}\E(.*?)\1,\s*/$2/gs;
+  # Whieh Data::Dumper formatted as
+  #
+  #    ["_MAGIC_REFPFXprefix", <representation of $ref> "_MAGIC_ELIDE_NEXT"]
+  #
+  # and we want to end up with
+  #
+  #    prefix<representation of $ref>      e.g. <984:ef8>[42,77]
+  #
+  s/\[\s*(["'])\Q${\_MAGIC_REFPFX}\E(.*?)\1,\s*/$2/gs;
   s/,\s*(["'])\Q${\_MAGIC_ELIDE_NEXT}\E\1,?\s*\]//gs
-    && $debug && btw "Unwrapped addrvis:",_dbvis($_);
+    && $debug && btw "Unwrapped REFPFX ",_dbvis($_);
 
   while ((pos()//0) < length) {
        if (/\G[\\\*\!]/gc)                       { atom($&, "prepend_to_next") }
