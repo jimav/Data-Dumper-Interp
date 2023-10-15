@@ -33,6 +33,7 @@ $SIG{__DIE__} = sub {
   if ($^S or !defined($^S)) { 
     die(@_); # in eval or at compile time
   } else {
+    warn "!! die trapped : @_";
     my $via_carp;
     for (my $i=0; ;$i++) {
       my $pkg = caller($i) || last;
@@ -45,9 +46,9 @@ $SIG{__DIE__} = sub {
       fail("croak/confess caught", @_);
     } else {
       my ($fn, $lno) = (caller(0))[1,2];
-      fail("croak/confess caught at ${fn}:$lno", Carp::longmess(@_));
+      fail("die caught at ${fn}:$lno", Carp::longmess(@_));
     }
-    bail_out("die trapped");
+    bail_out("__DIE__ trap");
   }
 };
 
@@ -63,7 +64,6 @@ sub visFoldwidth() {
  ." Foldwidth1=".u($Data::Dumper::Interp::Foldwidth1)
  .($Data::Dumper::Interp::Foldwidth ? ("\n".("." x $Data::Dumper::Interp::Foldwidth)) : "")
 }
-
 
 confess("Non-zero initial CHILD_ERROR ($?)") if $? != 0;
 
