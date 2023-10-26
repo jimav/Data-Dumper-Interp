@@ -1,12 +1,13 @@
 #!/usr/bin/env perl
 
 # Compile this before anything is modified by t_Setup
-our $test_sub;
+our ($test_sub, $test_sub_withproto);
 BEGIN {
   # WHY???  It must be something in Perl which otherwise
   # is not suppressed, triggering our __WARNING__ trap error.
   local ${^WARNING_BITS} = 0; # undo -w flag
   $test_sub = sub{ my $x = 42; };
+  $test_sub_withproto = sub(@){ my $x = 42; };
 }
 
 use FindBin qw($Bin);
@@ -347,6 +348,11 @@ if ($^O eq "MSWin32") {
   { my $code = 'vis($data)'; mycheck $code, 'sub { "DUMMY" }', eval $code; }
   local $Data::Dumper::Interp::Deparse = 1;
   { my $code = 'vis($data)'; mycheck $code, qr/sub \{\s*my \$x = 42;\s*\}/, eval $code; }
+}
+{ my $data = $test_sub_withproto;
+  { my $code = 'vis($data)'; mycheck $code, 'sub { "DUMMY" }', eval $code; }
+  local $Data::Dumper::Interp::Deparse = 1;
+  { my $code = 'vis($data)'; mycheck $code, qr/sub \(\@\) \{\s*my \$x = 42;\s*\}/, eval $code; }
 }
 
 # Floating point values (single values special-cased to show not as 'string')

@@ -1626,7 +1626,7 @@ sub _postprocess_DD_result {
     elsif (/\G${addrvis_re}/gsc)                 { atom($&, "prepend_to_next") }
 
     # With Deparse(1) the body has arbitrary Perl code, which we can't parse
-    elsif (/\Gsub\s*${curlies_re}/gc)            { atom($&) } # sub{...}
+    elsif (/\Gsub\s*(?:${parens_re}\s*)?${curlies_re}/gc) { atom($&) } # sub{...}
 
     # $VAR1->[ix] $VAR1->{key} or just $varname
     elsif (/\G(?:my\s+)?\$(?:${userident_re}|\s*->\s*|${balanced_re}+)++/gsc) { atom($&) }
