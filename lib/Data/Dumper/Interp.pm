@@ -15,11 +15,6 @@ use feature 'lexical_subs';
 
 no warnings "experimental::lexical_subs";
 
-package  Data::Dumper::Interp;
-{ no strict 'refs'; ${__PACKAGE__."::VER"."SION"} = 997.999; }
-# VERSION from Dist::Zilla::Plugin::OurPkgVersion
-# DATE from Dist::Zilla::Plugin::OurDate
-
 package
   # newline so Dist::Zilla::Plugin::PkgVersion won't add $VERSION
         DB {
@@ -29,6 +24,10 @@ package
 }
 
 package Data::Dumper::Interp;
+
+{ no strict 'refs'; ${__PACKAGE__."::VER"."SION"} = 997.999; }
+# VERSION from Dist::Zilla::Plugin::OurPkgVersion
+# DATE from Dist::Zilla::Plugin::OurDate
 
 use Moose;
 
@@ -175,8 +174,9 @@ sub AUTOLOAD {  # invoked on call to undefined *method*
 ############################################################################
 # Internal debug-message utilities
 
+sub u(_); # forward
 sub oops(@) { @_=("\n".(caller)." oops:\n",@_,"\n"); goto &Carp::confess }
-sub btwN($@) { my $N=shift; local $_=join("",@_); s/\n\z//s; printf "%4d: %s\n",(caller($N))[2],$_; }
+sub btwN($@) { my $N=shift; local $_=join("",map{u} @_); s/\n\z//s; printf "%4d: %s\n",(caller($N))[2],$_; }
 sub btw(@) { unshift @_,0; goto &btwN }
 
 sub _chop_ateval($) {  # remove "at (eval N) line..." from an exception message
@@ -608,7 +608,7 @@ my  $my_maxdepth;
 our $my_visit_depth = 0;
 
 my ($maxstringwidth, $truncsuffix, $objects, $opt_refaddr, $listform, $debug);
-my ($sortkeys);
+my ($sortkeys, $show_overloaded_classname);
 
 sub _Do {
   oops unless @_ == 1;
@@ -623,6 +623,16 @@ sub _Do {
 
   $maxstringwidth = 0 if ($maxstringwidth //= 0) >= INT_MAX;
   $truncsuffix //= "...";
+  if (ref($objects) eq "HASH") {
+    for (qw/show_overloaded_classname objects/) {
+      croak "Objects value is a hashref but '${_}' key is missing\n"
+        unless exists $objects->{$_};
+    }
+    $show_overloaded_classname = $objects->{show_overloaded_classname};
+    $objects = $objects->{objects};
+  } else {
+    $show_overloaded_classname = 1;
+  }
   $objects = [ $objects ] unless ref($objects //= []) eq 'ARRAY';
 
   my @orig_values = $self->dd->Values;
@@ -739,13 +749,14 @@ btw '@@@repl obj is overloaded' if $debug;
         # overloaded package; should not happen in this case.
         warn("Recursive overloads on $item ?\n"),last
           if $overload_depth++ > 10;
+        my $cn = $show_overloaded_classname ? "($class)" : "";
         # Stringify objects which have the stringification operator
         if (overload::Method($class,'""')) {
           my $prefix = _show_as_number($item) ? _MAGIC_NOQUOTES_PFX : "";
 btw '@@@repl prefix="',$prefix,'"' if $debug;
           $item = $item.""; # stringify;
           if ($item !~ /^${class}=REF/) {
-            $item = "${prefix}($class)$item";
+            $item = "${prefix}${cn}$item";
           } else {
             # The "stringification" looks like Perl's default; don't prefix it
           }
@@ -754,33 +765,31 @@ btw '@@@repl stringified:',$item if $debug;
         }
         # Substitute the virtual value behind an overloaded deref operator
         # and prefix with (classname) to make clear what happened.
+        my sub _wrap_with_classname($) {
+          $cn ? [ _MAGIC_REFPFX.$cn, $_[0], _MAGIC_ELIDE_NEXT ] : $_[0]
+        }
         if (overload::Method($class,'@{}')) {
-          #$item = \@{ $item };
-          $item = [ _MAGIC_REFPFX."($class)", \@{ $item }, _MAGIC_ELIDE_NEXT ];
+          $item = _wrap_with_classname \@{ $item };
 btw '@@@repl (overload @{} --> ', $item,')' if $debug;
           redo CHECKObject;
         }
         if (overload::Method($class,'%{}')) {
-          #$item = \%{ $item };
-          $item = [ _MAGIC_REFPFX."($class)", \%{ $item }, _MAGIC_ELIDE_NEXT ];
+          $item = _wrap_with_classname \%{ $item };
 btw '@@@repl (overload %{} --> ', $item,')' if $debug;
           redo CHECKObject;
         }
         if (overload::Method($class,'${}')) {
-          #$item = \${ $item };
-          $item = [ _MAGIC_REFPFX."($class)", \${ $item }, _MAGIC_ELIDE_NEXT ];
+          $item = _wrap_with_classname \${ $item };
 btw '@@@repl (overload ${} --> ', $item,')' if $debug;
           redo CHECKObject;
         }
         if (overload::Method($class,'&{}')) {
-          #$item = \&{ $item };
-          $item = [ _MAGIC_REFPFX."($class)", \&{ $item }, _MAGIC_ELIDE_NEXT ];
+          $item = _wrap_with_classname \&{ $item };
 btw '@@@repl (overload &{} --> ', $item,')' if $debug;
           redo CHECKObject;
         }
         if (overload::Method($class,'*{}')) {
-          #$item = \*{ $item };
-          $item = [ _MAGIC_REFPFX."($class)", \*{ $item }, _MAGIC_ELIDE_NEXT ];
+          $item = _wrap_with_classname \*{ $item };
 btw '@@@repl (overload *{} --> ', $item,')' if $debug;
           redo CHECKObject;
         }
@@ -1316,7 +1325,7 @@ sub _postprocess_DD_result {
 
     if ($prepending) { $_ = $prepending . $_; $prepending = ""; }
 
-    btw "###atom",_mycallloc(), _dbrawstr($_),"($mode)"
+    btwN 1,"###atom",_mycallloc(), _dbrawstr($_),"($mode)"
       ,"\n context:",_dbvisnew($context)->Sortkeys(sub{[grep{exists $_[0]->{$_}} qw/O C tlen children CLOSE_AFTER_NEXT/]})->Dump()
       if $debug;
     if ($mode eq "prepend_to_next") {
@@ -1815,6 +1824,7 @@ sub _Interpolate {
       if ($meth eq 'p') {
         if ($str =~ /\\./) {
           $str =~ s/\$\\/\$\\\\/g;   # Assume the punct var $\ is not intended
+          $str =~ s/([()])/\\$1/g;
           $_->[1] = "qq(" . $str . ")";
           $_->[0] = 'e';
         }
@@ -1914,6 +1924,9 @@ sub DB_Vis_Eval($$) {
      ;
      ###??? FIXME why is DB_Vis_Evalwrapper needed?  Lexical scope?
      &DB_Vis_Evalwrapper;
+#Data::Dumper::Interp::btw("-------------\n\$@=",$@,"\n",
+#  "string_to_eval=",$Data::Dumper::Interp::string_to_eval,"\n",
+#  "result=",Data::Dumper::Interp::_dbavis(@Data::Dumper::Interp::result));
      @Data::Dumper::Interp::result
   };
   my $errmsg = $@;
@@ -2296,6 +2309,22 @@ the stringification ('""') operator,
 or array-, hash-, scalar-, or glob- deref operators;
 in that case the first overloaded operator found will be evaluated,
 the object replaced by the result, and the check repeated.
+
+By default, "(classname)" is prepended when an overloaded operator is
+evaluated to make clear what happened.
+
+=head2 Objects(I<< {objects => VALUE, show_overloaded_classname => BOOL} >>)
+
+This form, passing a hashref,
+allows control of whether "(classname)" is prepended to the result
+from an overloaded operator.
+
+If the I<show_overloaded_classname> value is false, then overload results
+will appear unadorned, i.e. they will look as if the overload result
+was the original value.
+
+The I<objects> value indicates whether and for which classes special
+object handling is enabled (false, "1", "classname" or [list of classnames]).
 
 =head2 Sortkeys(I<SUBREF>)
 
