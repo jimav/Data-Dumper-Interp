@@ -13,8 +13,8 @@ BEGIN {
 use FindBin qw($Bin);
 use lib $Bin;
 use t_Common ; # strict, warnings, Carp
-use t_TestCommon ':silent', # Test2::V0 etc.
-                 qw/bug displaystr fmt_codestring timed_run 
+use t_TestCommon ##':silent', # Test2::V0 etc.
+                 qw/bug displaystr fmt_codestring timed_run
                     rawstr showstr showcontrols
                     mycheckeq_literal mycheck @quotes/;
 
@@ -27,11 +27,11 @@ $SIG{__WARN__} = sub { confess("warning trapped: @_") };
 
 use Data::Compare qw(Compare);
 
-# This test mysteriously dies (exit 255) with no visible message 
-# on certain Windows machines.  Try to explicitly 'fail' instead of 
+# This test mysteriously dies (exit 255) with no visible message
+# on certain Windows machines.  Try to explicitly 'fail' instead of
 # actually dieing.
 $SIG{__DIE__} = sub {
-  if ($^S or !defined($^S)) { 
+  if ($^S or !defined($^S)) {
     die(@_); # in eval or at compile time
   } else {
     warn "!! die trapped : @_";
@@ -139,7 +139,7 @@ sub mychecklit(&$$) {
     my $exp = quotemeta $exp_template;
     $exp =~ s/_Q_/$dq_expected_re/g;
     $exp =~ s/_q_/$sq_expected_re/g;
-    my $code_display = $code . " with \$_[1]=$quotes[0].$item.$quotes[1]";
+    my $code_display = $code . "(OS=$^O) with \$_[1]=$quotes[0].$item.$quotes[1]";
     local $Data::Dumper::Interp::Foldwidth = 0;  # disable wrapping
     mycheck $code_display, qr/$exp/, $doeval->($code, $item) ;
   }
@@ -212,6 +212,9 @@ $Data::Dumper::Interp::Foldwidth = 72;
 $. = 1234;
 $ENV{EnvVar} = "Test EnvVar Value";
 
+my $BS = "\\";
+my $SQ = "'";
+my $DQ = '"';
 
 my %toplex_h = ("" => "Emp", A=>111,"B B"=>222,C=>{d=>888,e=>999},D=>{},EEEEEEEEEEEEEEEEEEEEEEEEEE=>\42,F_long_enough_to_force_wrap_FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF=>\\\43, G=>qr/foo.*bar/xsi);
    # EEE... identifer is long to force linewrap
@@ -255,15 +258,15 @@ our $ABC_regexp = $main::global_regexp;
 
 package main::Mybase;
 sub new { bless \do{ my $t = 1000+$_[1] }, $_[0] }
-use overload 
+use overload
   '""' => sub{ my $self=shift; "Mybase-ish-".$$self }, # "Mybase-ish-1xxxx"
-  # Implement '&' so Data::Dumper::Interp::_show_as_number 
+  # Implement '&' so Data::Dumper::Interp::_show_as_number
   # will decide it should be displayed as an unquoted number.
   '&'  => sub{ my ($self,$operand,$swapped)=@_; $$self & $operand },
   ;
 package main::Myderived;
 our @ISA = ("main::Mybase");
-    
+
 package main;
 
 $_ = "GroupA.GroupB";
@@ -284,10 +287,19 @@ $_ = "GroupA.GroupB";
 { my $code = 'qshpath()';            mycheck $code, "${_}",   eval $code; }
 { my $code = 'qshpath';              mycheck $code, "${_}",   eval $code; }
 
-if ($^O eq "MSWin32") {
-  { my $code = q(qshlist("a b","c",'$d')); mycheck $code, q("a b" c "$d"),  eval $code; }
-} else {
-  { my $code = q(qshlist("a b","c",'$d')); mycheck $code, q("a b" c '$d'),  eval $code; }
+foreach my $os ($^O, 'linux', 'MSWin32') {
+  local $^O = "$os"; # re-stringify to avoid undef when setting local $^O = $^O;
+
+  if ($^O eq "MSWin32") {
+    { my $code = q(qshlist("a b","c",'$d')); mycheck $code." (OS=$^O)", q("a b" c "$d"),  eval $code; }
+    { my $code = q( qsh("a b\\\\")        ); mycheck $code." (OS=$^O)", q("a b\\\\"),     eval $code; }
+    { my $code = q( qsh(q<a b">)          ); mycheck $code." (OS=$^O)", q("a b\\""),      eval $code; }
+  } else {
+    { my $code = q(qshlist("a b","c",'$d')); mycheck $code." (OS=$^O)", q("a b" c '$d'),  eval $code; }
+    { my $code = q( qsh("a b${BS}")       ); mycheck $code." (OS=$^O)", q('a b\\'),       eval $code; }
+    { my $code = q( qsh("a b${BS}${BS}")  ); mycheck $code." (OS=$^O)", q('a b\\\\'),     eval $code; }
+    { my $code = q( qsh(q<a b">)          ); mycheck $code." (OS=$^O)", q('a b"'),        eval $code; }
+  }
 }
 
 # Basic checks
@@ -418,7 +430,7 @@ my $ratstr  = '1/9';
   { local $Data::Dumper::Interp::Objects = qr/Some::Other::Class/;
     my $s = vis($bigf); oops "bug($s)" unless $s =~ /^bless.*BigFloat/s;
   }
-  # Yes if globally enabled 
+  # Yes if globally enabled
   { local $Data::Dumper::Interp::Objects = 1;
     mychecklit(sub{eval $_[0]}, $bigf, qr/(?:\(Math::BigFloat[^\)]*\))?${bigfstr}/);
   }
@@ -488,7 +500,7 @@ EOF
 
 # There was a bug for s/dvis called direct from outer scope, so don't use eval:
 #
-# Another bug was here: On some older platforms qr/.../ can visualize to a 
+# Another bug was here: On some older platforms qr/.../ can visualize to a
 # different, longer representation, so forcing wrap to be the same everywhere
 #
 my $SS = do{ my $x=" "; dvis('$x') =~ /x="(.)"/ or die; $1 }; # spacedots?
@@ -561,7 +573,7 @@ sub doquoting($$) {
       $quoted =~ s/"/\\"/g;
       $quoted = '"' . $quoted . '"';
     }
-    oops("testbug: Useqq subopt: '",keys(%subopts),"'\n") 
+    oops("testbug: Useqq subopt: '",keys(%subopts),"'\n")
       if %subopts;
   } else {
     $quoted =~ s/([\\'])/\\$1/gs;

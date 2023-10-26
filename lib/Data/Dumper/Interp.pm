@@ -383,45 +383,78 @@ sub addrvis_forget() {
 sub u(_) { $_[0] // "undef" }
 sub quotekey(_); # forward.  Implemented after regex declarations.
 
-sub __stringify($) {
+sub __stringify_if_overloaded($) {
   if (defined(my $class = blessed($_[0]))) {
     return "$_[0]" if overload::Method($class,'""');
   }
   $_[0]
 }
 
-use constant _SHELL_UNSAFE_REGEX =>
-  ($^O eq "MSWin32" ? qr/[^-=\w_:\.,\\]/ : qr/[^-=\w_\/:\.,]/);
-
-sub __forceqsh(_) {
+use constant _NIX_SHELL_UNSAFE_REGEX => qr/[^-=\w_\/:\.,]/a;
+sub __nix_forceqsh(_) {
   local $_ = shift;
   return "undef" if !defined;  # undef without quotes
   $_ = vis($_) if ref;
-  if ($^O eq "MSWin32") {
-    # Backslash usually need not be protected, except:
-    #  \" quotes the " whether inside "quoes" or bare (!)
-    #  \\ quotes the \ ONLY(?) if immediately followed by \"
-    s/\\(?=")/\\\\/g;
-    s/"/\\"/g;
-    return "\"${_}\"";  # 6/7/23: UNtested
+  # Prefer "double quoted" if no shell escapes would be needed.
+  if (/["\$`!\\\x{00}-\x{1F}\x{7F}]/) {
+    # Unlike Perl, /bin/sh does not recognize any backslash escapes in '...'
+    s/'/'\\''/g; # foo'bar => foo'\''bar
+    return "'${_}'";
   } else {
-    # Prefer "double quoted" if no shell escapes would be needed.
-    if (/["\$`!\\\x{00}-\x{1F}\x{7F}]/) {
-      # Unlike Perl, /bin/sh does not recognize any backslash escapes in '...'
-      s/'/'\\''/g; # foo'bar => foo'\''bar
-      return "'${_}'";
-    } else {
-      return "\"${_}\"";
-    }
+    return "\"${_}\"";
   }
 }
+
+use constant _WIN_CMD_UNSAFE_REGEX => qr/[^-\w=_:\.,\\]/a;
+sub __win_forceqsh(_) {
+  local $_ = shift;
+  return "undef" if !defined;  # undef without quotes
+  $_ = vis($_) if ref;
+  # This was intended to quote as would be needed to pass the word as a
+  # parameter to a command typed to cmd.com in Windows.
+  # However parameter parameter parsing is implemented within each command
+  # and there is no universal ruleset.   For example Strawberry perl
+  # appears to split parameters on white space only whereas (as I understand
+  # it) Windows commands, at least built-in ones, split words on any of
+  # space tab , ; or = and all those must be protected, see
+  #
+  #    https://ss64.com/nt/syntax-esc.html
+  #
+  # For the moment at least, qsh "quotes" words so they come through when
+  # passed as parameters to Strawberry perl when, in cmd.com, you type
+  #
+  #    perl \path\to\script.pl PARAM1 PARAM2 ...
+  #
+  # Here's what I *think* is true:
+  #  * "double quotes" escape word delimiters (space tab , ; =)
+  #  * ^ escapes : & \ < > ^ | when NOT in "quotes"
+  #    (but we always put them in "quotes")
+  #  * ^<newline> (outside of "quotes") is ignored
+  #    (there appears to be impossible to directly include a newline in a cmd
+  #     parameter.  It requires a helper program or interpolating
+  #     a %variable%, see https://superuser.com/a/1519790)
+  #  * \ outside "quotes" means \
+  #    \ inside "quotes" is literal _unless_ followed by "
+  # Backslash usually need not be protected, except:
+  #  * \ quotes " whether inside "quotes" or bare (!)
+  #  * \ quotes \ ONLY(?) if immediately followed by " or \"
+  #    otherwise it means two backslashes.
+  #FIXME TODO UNFINISHED
+  s/\\(?=")/\\\\/g;
+  s/"/\\"/g;
+  s/\\\z/\\\\/g; # because the closing " will follow
+  return "\"${_}\"";  # 6/7/23: UNtested
+}
+
 sub qsh(_) {
-  local $_ = __stringify(shift());
-  defined && !ref && ($_ !~ _SHELL_UNSAFE_REGEX)
-    && $_ ne "" && $_ ne "undef" ? $_ : __forceqsh
+  local $_ = __stringify_if_overloaded(shift());
+  $^O eq "MSWin32" ?
+    (defined && !ref && $_ ne "" && $_ ne "undef" && $_ !~ _WIN_CMD_UNSAFE_REGEX ? $_ : __win_forceqsh)
+    :
+    (defined && !ref && $_ ne "" && $_ ne "undef" && $_ !~ _NIX_SHELL_UNSAFE_REGEX ? $_ : __nix_forceqsh)
 }
 sub qshpath(_) {  # like qsh but does not quote initial ~ or ~username
-  local $_ = __stringify(shift());
+  local $_ = __stringify_if_overloaded(shift());
   return qsh($_) if !defined or ref;
   my ($tilde_prefix, $rest) = /^( (?:\~[^\/\\]*[\/\\]?+)? )(.*)/xs or die;
   $rest eq "" ? $tilde_prefix : $tilde_prefix.qsh($rest)
