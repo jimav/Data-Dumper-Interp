@@ -45,6 +45,7 @@ use List::Util 1.45 qw(min max first none all any sum0);
 use Data::Structure::Util qw/circular_off/;
 use Regexp::Common qw/RE_balanced/;
 use Term::ReadKey ();
+use Capture::Tiny qw/capture_merged/;
 use overload ();
 
 ############################ Exports #######################################
@@ -608,15 +609,16 @@ sub _get_terminal_width() {  # returns undef if unknowable
              -t STDOUT ? *STDOUT :
              -t STDIN  ? *STDIN  :
         do{my $fh; for("/dev/tty",'CONOUT$') { last if open $fh, $_ } $fh} ;
-    my $wmsg = ""; # Suppress a "didn't work" warning from Term::ReadKey.
-                   # On some platforms (different libc?) "stty" directly
-                   # outputs "stdin is not a tty" which we can not trap.
-                   # Probably this is a Term::Readkey bug where it should
-                   # redirect such messages to /dev/null...
-    my ($width, $height) = do {
-      local $SIG{'__WARN__'} = sub { $wmsg .= $_[0] };
-      $fh ? Term::ReadKey::GetTerminalSize($fh) : ()
-    };
+    my ($width, $height);
+    if ($fh) {
+      # Sigh.  It never ends!  On some platforms (different libc?)
+      # "stty" directly prints "stdin is not a tty" which we can not trap.
+      # Probably this is a bug in Term::Readkey where it should redirect
+      # such messages to /dev/null.  So we have to do it here.
+      () = capture_merged {
+        ($width, $height) = Term::ReadKey::GetTerminalSize($fh);
+      }
+    }
     return $width; # possibly undef (sometimes seems to be zero ?!?)
   }
 }
