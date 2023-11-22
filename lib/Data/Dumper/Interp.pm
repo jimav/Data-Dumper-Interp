@@ -611,12 +611,18 @@ sub _get_terminal_width() {  # returns undef if unknowable
         do{my $fh; for("/dev/tty",'CONOUT$') { last if open $fh, $_ } $fh} ;
     my ($width, $height);
     if ($fh) {
+      # Some platforms (bsd?) carp if the terminal size can not be determined.
+      # We don't want to see any such warnings.  Also there might be a
+      # __WARN__ trap which we don't want to trigger
+      #
       # Sigh.  It never ends!  On some platforms (different libc?)
       # "stty" directly prints "stdin is not a tty" which we can not trap.
       # Probably this is a bug in Term::Readkey where it should redirect
       # such messages to /dev/null.  So we have to do it here.
       () = capture_merged {
-        ($width, $height) = Term::ReadKey::GetTerminalSize($fh);
+        delete local $INC{__WARN__};
+        delete local $INC{__DIE__};
+        ($width, $height) = eval{ Term::ReadKey::GetTerminalSize($fh) };
       }
     }
     return $width; # possibly undef (sometimes seems to be zero ?!?)
