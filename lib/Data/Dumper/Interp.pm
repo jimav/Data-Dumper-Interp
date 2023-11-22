@@ -391,7 +391,7 @@ sub __stringify_if_overloaded($) {
   $_[0]
 }
 
-use constant _NIX_SHELL_UNSAFE_REGEX => qr/[^-=\w_\/:\.,]/a;
+use constant _NIX_SHELL_UNSAFE_REGEX => qr/[^-=\w_:\.,\/]/a;
 sub __nix_forceqsh(_) {
   local $_ = shift;
   return "undef" if !defined;  # undef without quotes
@@ -406,7 +406,7 @@ sub __nix_forceqsh(_) {
   }
 }
 
-use constant _WIN_CMD_UNSAFE_REGEX => qr/[^-\w=_:\.,\\]/a;
+use constant _WIN_CMD_UNSAFE_REGEX   => qr/[^-=\w_:\.,\\]/a;
 sub __win_forceqsh(_) {
   local $_ = shift;
   return "undef" if !defined;  # undef without quotes
@@ -431,7 +431,7 @@ sub __win_forceqsh(_) {
   #  * ^ escapes : & \ < > ^ | when NOT in "quotes"
   #    (but we always put them in "quotes")
   #  * ^<newline> (outside of "quotes") is ignored
-  #    (there appears to be impossible to directly include a newline in a cmd
+  #    (it appears to be impossible to directly include a newline in a cmd
   #     parameter.  It requires a helper program or interpolating
   #     a %variable%, see https://superuser.com/a/1519790)
   #  * \ outside "quotes" means \
@@ -439,7 +439,7 @@ sub __win_forceqsh(_) {
   # Backslash usually need not be protected, except:
   #  * \ quotes " whether inside "quotes" or bare (!)
   #  * \ quotes \ ONLY(?) if immediately followed by " or \"
-  #    otherwise it means two backslashes.
+  #    otherwise \\ means two backslashes.
   #FIXME TODO UNFINISHED
   s/\\(?=")/\\\\/g;
   s/"/\\"/g;
