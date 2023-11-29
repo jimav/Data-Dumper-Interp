@@ -254,7 +254,7 @@ $Foldwidth1     = undef        unless defined $Foldwidth1; # override for 1st
 # Initial D::D values are captured once when we are first loaded.
 #
 #$Useqq          = "unicode:controlpic" unless defined $Useqq;
-$Useqq          = "unicode"    unless defined $Useqq;
+$Useqq          = "unicode:"   unless defined $Useqq;
 $Quotekeys      = 0            unless defined $Quotekeys;
 $Sortkeys       = \&__sortkeys unless defined $Sortkeys;
 $Maxdepth       = $Data::Dumper::Maxdepth   unless defined $Maxdepth;
@@ -1314,6 +1314,11 @@ sub __subst_spacedots() {  # edits $_
     s{ }{\N{MIDDLE DOT}}g;
   }
 }
+sub __nums_with_underscores() {
+  if (looks_like_number($_)) {
+    while( s/^([^\._]*?\d)(\d\d\d)(?=$|\.|_)/$1_$2/ ) { }
+  }
+}
 
 my $indent_unit;
 
@@ -1337,6 +1342,7 @@ sub _postprocess_DD_result {
   my $unesc_unicode = $useqq =~ /utf|unic/;
   my $controlpics   = $useqq =~ /pic/;
   my $spacedots     = $useqq =~ /space/;
+  my $underscores   = $useqq =~ /_/;
   my $qq            = $useqq =~ /qq(?:=(..))?/ ? ($1//'{}') : '';
   my $pad = $self->Pad() // "";
 
@@ -1363,6 +1369,7 @@ sub _postprocess_DD_result {
     __subst_controlpic_backesc      if $controlpics;
     __subst_spacedots        if $spacedots;
     __change_quotechars($qq) if $qq;
+    __nums_with_underscores  if $underscores;
 
     if ($prepending) { $_ = $prepending . $_; $prepending = ""; }
 
@@ -2377,7 +2384,7 @@ value, e.g. "A.20" sorts before "A.100".  See C<Data::Dumper> documentation.
 0 means generate 'single quoted' strings when possible.
 
 1 means generate "double quoted" strings as-is from Data::Dumper.
-Non-ASCII charcters will be shown as hex escapes.
+Non-ASCII charcters will be shown as hex or octal escapes.
 
 Otherwise generate "double quoted" strings enhanced according to option
 keywords given as a :-separated list, e.g. Useqq("unicode:controlpics").
