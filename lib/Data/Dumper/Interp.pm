@@ -1960,7 +1960,7 @@ sub DB_Vis_Eval($$) {
     local $Data::Dumper::Interp::string_to_eval =
       "package $pkg; "
        # N.B. eval first clears $@ so we must restore $@ inside the eval
-     .' &Data::Dumper::Interp::_RestorePunct_NoPop;'  # saved in _Interpolate
+     .' &Data::Dumper::Interp::_RestorePunct_NoPop();'  # saved in _Interpolate
        # In case something carps or croaks (e.g. because of ${\(somefunc())}
        # or a tie handler), force a full backtrace so the user's call location
        # is visible.  Unfortunately there is no way to make carp() show only
@@ -2190,7 +2190,7 @@ B<r> - show abbreviated addresses of objects and other refs
 
 =over
 
-Calling B<< Reftype(1) >> using the OO api has the same effect.
+Calling B<< Refaddr(1) >> using the OO api has the same effect.
 
 =back
 
