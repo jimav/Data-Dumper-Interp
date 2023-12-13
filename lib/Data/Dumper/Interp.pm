@@ -1283,7 +1283,8 @@ sub __change_quotechars($) {  # edits $_
 }
 
 my %qqesc2controlpic = (
-  '\0' => "\N{SYMBOL FOR NULL}",
+  '\0' => "\N{SYMBOL FOR NULL}",   # occurs if next char is not a digit
+  '\000' => "\N{SYMBOL FOR NULL}", # occurs if next char is a digit
   '\a' => "\N{SYMBOL FOR BELL}",
   '\b' => "\N{SYMBOL FOR BACKSPACE}",
   '\e' => "\N{SYMBOL FOR ESCAPE}",
@@ -1303,7 +1304,8 @@ my %char2controlpic = (
 sub __subst_controlpic_backesc() {  # edits $_
   # Replace '\t' '\n' etc. escapes with "control picture" characters
   return unless/^"/;
-  s{ \G (?: [^\\]++ | \\[^0abefnrt] )*+ \K ( \\[abefnrt] | \\0(?![0-7]) )
+  s{ \G (?: [^\\]++ | \\[^0abefnrt] )*+ \K
+        ( \\[abefnrt] | \\0(?![0-7]) | \\[0-3][0-7][0-7] )
    }{
       $qqesc2controlpic{$1} // $1
     }xesg;
