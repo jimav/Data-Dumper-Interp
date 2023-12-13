@@ -649,7 +649,7 @@ my  $my_maxdepth;
 our $my_visit_depth = 0;
 
 my ($maxstringwidth, $truncsuffix, $objects, $opt_refaddr, $listform, $debug);
-my ($sortkeys, $show_overloaded_classname);
+my ($sortkeys, $show_classname);
 
 sub _Do {
   oops unless @_ == 1;
@@ -665,14 +665,14 @@ sub _Do {
   $maxstringwidth = 0 if ($maxstringwidth //= 0) >= INT_MAX;
   $truncsuffix //= "...";
   if (ref($objects) eq "HASH") {
-    for (qw/show_overloaded_classname objects/) {
+    for (qw/show_classname objects/) {
       croak "Objects value is a hashref but '${_}' key is missing\n"
         unless exists $objects->{$_};
     }
-    $show_overloaded_classname = $objects->{show_overloaded_classname};
+    $show_classname = $objects->{show_classname};
     $objects = $objects->{objects};
   } else {
-    $show_overloaded_classname = 1;
+    $show_classname = 1;
   }
   $objects = [ $objects ] unless ref($objects //= []) eq 'ARRAY';
 
@@ -790,7 +790,7 @@ btw '@@@repl obj is overloaded' if $debug;
         # overloaded package; should not happen in this case.
         warn("Recursive overloads on $item ?\n"),last
           if $overload_depth++ > 10;
-        my $cn = $show_overloaded_classname ? "($class)" : "";
+        my $cn = $show_classname ? "($class)" : "";
         # Stringify objects which have the stringification operator
         if (overload::Method($class,'""')) {
           my $prefix = _show_as_number($item) ? _MAGIC_NOQUOTES_PFX : "";
@@ -2031,7 +2031,7 @@ Data::Dumper::Interp - interpolate Data::Dumper output into strings for human co
   say hvis %hash;    # (abc => [1,2,3,4,5], def => undef)
 
   # Format a reference with abbreviated referent address
-  say visr $href;    # HASH<457:1c9>{abc => [1,2,3,4,5], ...}
+  say visr $ref;     # HASH<457:1c9>{abc => [1,2,3,4,5], ...}
 
   # Just abbreviate a referent address or arbitrary number
   say addrvis refaddr($ref);  # 457:1c9
@@ -2093,14 +2093,13 @@ with pre- and post-processing to "improve" the results:
 
 =over 2
 
-=item * Output is 1 line if possible,
-otherwise folded at your terminal width, WITHOUT a trailing newline.
+=item * One line if possible, else folded to terminal with, WITHOUT newline.
 
 =item * Safely printable Unicode characters appear as themselves.
 
-=item * Object internals are not shown by default; Math:BigInt etc. are stringified.
+=item * Objects like Math:BigInt etc. are stringified (by default).
 
-=item * "virtual" values behind overloaded deref operators are shown.
+=item * "Virtual" values behind overloaded deref operators are shown.
 
 =item * Data::Dumper bugs^H^H^H^Hquirks are circumvented.
 
@@ -2133,13 +2132,11 @@ from interpolating it beforehand.
 
 =head2 dvis I<'string to be interpolated'>
 
-Like C<ivis> but interpolations are prefixed with a "expr=" label
-and spaces are shown visibly as '·'.
+The 'd' is for "B<d>ebugging".  Like C<ivis> but labels expansions
+with "expr=" and shows spaces visibly as '·'.  Other debug-oriented
+formatting may also occur (TBD).
 
-The 'd' in 'dvis' stands for B<d>ebugging messages, a frequent use case where
-brevity of typing is needed.
-
-=head2 vis [I<SCALAREXPR>]
+=head2 vis [I<SCALAREXPR>B<]>
 
 =head2 avis I<LIST>
 
@@ -2168,7 +2165,7 @@ The available modifier characters are:
 
 =over 2
 
-B<l> - omit parenthesis to return a bare list (only with "avis" or "hvis")
+B<l> - omit parenthesis to return a bare list (with "avis" or "hvis")
 
 B<o> - show object internals
 
@@ -2207,7 +2204,7 @@ Calling B<< Maxdepth(NUMBER) >> using the OO api has the same effect.
 =back
 
 Functions must be imported explicitly
-unless they are imported by default (list shown below)
+unless they are imported by default (see list below)
 or created via the :all tag.
 
 To avoid having to import functions in advance, you can
@@ -2221,13 +2218,12 @@ use them as methods and import only the C<visnew> function:
   say visnew->avis2lrq(@ARGV);
   etc.
 
-(C<visnew> creates a new object.  Non-existent methods are auto-generated when
-first called via the AUTOLOAD mechanism).
+(C<visnew> creates a new object.  Non-existent methods are auto-generated
+via the AUTOLOAD mechanism).
 
 =head2 Functions imported by default
 
  ivis  dvis    vis  avis  hvis
-
  ivisq dvisq   visq avisq hvisq rvis rvisq
 
  visnew
@@ -2239,8 +2235,8 @@ Z<> Z<>
 
   use Data::Dumper::Interp qw/:all/;
 
-This generates and imports all possible variations using suffix
-characters in alphabetical order, without underscores, with NUMBER <= 2.
+This generates and imports all possible variations using only suffix
+characters, in alphabetical order, with NUMBER <= 2.
 There are 119 variations, too many to remember.
 
 You only need to know the basic names
@@ -2269,20 +2265,20 @@ The C<:debug> import tag prints messages chronicling these events.
 
 =head2 addrvis I<REF_or_NUMBER>
 
-This function returns a string representing an address in both decimal and
+Returns a string showing an address in both decimal and
 hexadecimal, but abbreviated to only the last few digits.
 
 The number of digits starts at 3 and increases over time if necessary
 to keep new results unambiguous.
 
 For REFs, the result is like I<< "HASHE<lt>457:1c9E<gt>" >>
-or, for blessed objects, I<< "Package::NameE<lt>457:1c9E<gt>" >>.
+or I<< "Package::NameE<lt>457:1c9E<gt>" >>.
 
 If the argument is a plain number, just the abbreviated address
 is returned, e.g. I<< "E<lt>457:1c9E<gt>" >>.
 
 I<"undef"> is returned if the argument is undefined.
-Croaks if the argument is defined but not a ref.
+Croaks if the argument is defined but not a number or reference.
 
 C<addrvis_digits(NUMBER)> forces a minimum width
 and C<addrvis_forget()> discards past values and resets to 3 digits.
@@ -2299,7 +2295,7 @@ Like C<addrvis> but omits the <angle brackets>.
 
 These create an object initialized from the global configuration
 variables listed below.  No arguments are permitted.
-C<visnew> is simply a shorthand wrapper.
+C<visnew> is simply a shorthand.
 
 B<All the functions described above> and any variations
 may be called as I<methods> on an object
@@ -2363,13 +2359,13 @@ the object replaced by the result, and the check repeated.
 By default, "(classname)" is prepended when an overloaded operator is
 evaluated to make clear what happened.
 
-=head2 Objects(I<< {objects => VALUE, show_overloaded_classname => BOOL} >>)
+=head2 Objects(I<< {objects => VALUE, show_classname => BOOL} >>)
 
 This form, passing a hashref,
 allows control of whether "(classname)" is prepended to the result
 from an overloaded operator.
 
-If the I<show_overloaded_classname> value is false, then overload results
+If the I<show_classname> value is false, then overload results
 will appear unadorned, i.e. they will look as if the overload result
 was the original value.
 
