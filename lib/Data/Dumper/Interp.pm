@@ -1,5 +1,5 @@
-# License: Public Domain or CC0
-# See https://creativecommons.org/publicdomain/zero/1.0/
+# License: Public Domain or CC0 See
+# https://creativecommons.org/publicdomain/zero/1.0/
 # The author, Jim Avera (jim.avera at gmail) has waived all copyright and
 # related or neighboring rights.  Attribution is requested but is not required.
 
@@ -543,15 +543,16 @@ sub _generate_sub($;$) {
     $code .= ";";
   } else {
     if ($basename eq "vis") {
-      $code .= " { &__getself_s->_Listform('')";
+      my $listform = delete($mod{l}) ? 'l' : '';
+      $code .= " { &__getself_s->_Listform('${listform}')";
     }
     elsif ($basename eq "avis") {
       my $listform = delete($mod{l}) ? 'l' : 'a';
-      $code .= " { &__getself_a->_Listform('$listform')";
+      $code .= " { &__getself_a->_Listform('${listform}')";
     }
     elsif ($basename eq "hvis") {
       my $listform = delete($mod{l}) ? 'l' : 'h';
-      $code .= " { &__getself_h->_Listform('$listform')";
+      $code .= " { &__getself_h->_Listform('${listform}')";
     }
     elsif ($basename eq "ivis") {
       $code .= " { \@_ = ( &__getself" ;
@@ -562,12 +563,16 @@ sub _generate_sub($;$) {
     }
     else { oops }
 
+    my $useqq = "";
+    $useqq .= ":unicode:controlpics" if delete $mod{c};
+    $useqq .= ":condense"            if delete $mod{C};
+    $code .= '->Debug(2)'     if delete $mod{d};
     $code .= "->Maxdepth($N)" if defined($N);
     $code .= '->Objects(0)'   if delete $mod{o};
-    $code .= '->Useqq(0)'     if delete $mod{q};
-    $code .= '->Useqq("unicode:controlpics")' if delete $mod{c};
     $code .= '->Refaddr(1)'   if delete $mod{r};
-    $code .= '->Debug(2)'     if delete $mod{d};
+
+    $code .= "->Useqq(\$Useqq.'${useqq}')" if $useqq ne "";
+    $code .= "->Useqq(0)"     if delete $mod{q};
 
     if ($basename =~ /^([id])vis/) {
       $code .= ", shift, '$1' ); goto &_Interpolate }";
@@ -1774,6 +1779,8 @@ sub _postprocess_DD_result {
   elsif (index($listform,'l') >= 0) {
     # show as a bare list without brackets
     $outstr =~ s/\A(?:${addrvis_re})?[\[\{]// && $outstr =~ s/[\]\}]\z//s or oops;
+    # or a single string without "quote marks"
+    $outstr =~ s/\A"(.*)"\z/$1/;
   }
 
   # Insert user-specified padding after each embedded newline
@@ -2212,7 +2219,7 @@ The available modifier characters are:
 
 =over 2
 
-B<l> - omit parenthesis to return a bare list (with "avis" or "hvis")
+B<l> - omit parenthesis to return a bare list with "avis" or "hvis"; omit quotes from a string formatted by "vis".
 
 B<o> - show object internals
 
@@ -2248,6 +2255,10 @@ Calling B<< Maxdepth(NUMBER) >> using the OO api has the same effect.
 
 =back
 
+B<c> - Show control characters as "Control Picture" characters
+
+B<C> - condense strings with repeated characters
+
 =back
 
 Functions must be imported explicitly
@@ -2282,8 +2293,9 @@ Z<> Z<>
 
   use Data::Dumper::Interp qw/:all/;
 
-This generates and imports all possible variations using only suffix
-characters, in alphabetical order, with NUMBER <= 2.
+This generates and imports methods uing all possible combinations of
+I<< <NUMBER> >>,C<l>,C<o>,C<q>, and C<r>,
+in alphabetical order, with NUMBER <= 2.
 There are 119 variations, too many to remember.
 
 You only need to know the basic names
@@ -2460,7 +2472,15 @@ Space characters are shown as '·' (Middle Dot).
 
 =item "condense"
 
-Condense long strings.  For example, 42 repeated 'A's appear as "⸨Ax42⸩".
+Repeated sequences in strings are shown as "⸨I<char>xI<repcount>⸩".
+For example
+
+  vec(my $s, 31, 1) = 1;
+  my ($binstr) = unpack "b*", $s;
+  say $binstr;
+  say visnew->Useqq("unicode:condense")->visl($binstr);
+  --> 00000000000000000000000000000001
+  --> ⸨0×31⸩1
 
 =item "underscores"
 
