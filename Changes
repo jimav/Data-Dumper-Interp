@@ -1,5 +1,6 @@
 (Recent) Revision history for Perl extension Data-Dumper-Interp
 
+7.001 - dvis (and any with Useqq(...:condense) show replicated chars compactly
 6.011 - Silence 'stty' message if no terminal width is available
 6.010 - trying to find mystery test failure on one Windows smoker host
 6.009 - Fix result-parsing bug with Deparse(1).

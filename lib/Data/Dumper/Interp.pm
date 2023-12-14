@@ -252,9 +252,9 @@ $Foldwidth1     = undef        unless defined $Foldwidth1; # override for 1st
 
 # The following override Data::Dumper defaults
 # Initial D::D values are captured once when we are first loaded.
-#
-#$Useqq          = "unicode:controlpic" unless defined $Useqq;
-$Useqq          = "unicode:"   unless defined $Useqq;
+
+#$Useqq          = "<unicode:controlpic>" unless defined $Useqq;
+$Useqq          = "<unicode>"    unless defined $Useqq;
 $Quotekeys      = 0            unless defined $Quotekeys;
 $Sortkeys       = \&__sortkeys unless defined $Sortkeys;
 $Maxdepth       = $Data::Dumper::Maxdepth   unless defined $Maxdepth;
@@ -480,13 +480,16 @@ sub __getself_h {
   $obj->Values([{@_}])
 }
 
-sub _EnabSpacedots {
-  # Append :spacedots to Useqq if Useqq matches the global default
-  # (and if the default used extended options).
-  my $self = shift;
+sub _EnabUseqqFeature {
+  # Append <feature> to Useqq ONLY if Useqq has not been changed
+  # (indicated by "(parens)" in the value -- see $Useqq = ... )
+  # Does nothing unless the default enables extended features.
+  my ($self, $feature) = @_;
   my $curr = $self->Useqq;
-  return $self if length($curr//"") <= 1 or $curr eq $Useqq;
-  $self->Useqq($curr.":spacedots")
+  return $self if length($curr//"") <= 1
+                    || substr($curr,0,1) ne "<"
+                    || substr($curr,-1,1) ne ">";
+  $self->Useqq($curr.$feature)
 }
 
 sub _generate_sub($;$) {
@@ -552,7 +555,8 @@ sub _generate_sub($;$) {
       $code .= " { \@_ = ( &__getself" ;
     }
     elsif ($basename eq "dvis") {
-      $code .= " { \@_ = ( &__getself->_EnabSpacedots" ;
+      $code .= " { \@_ = ( &__getself->_EnabUseqqFeature(':spacedots:condense')" ;
+      #$code .= " { \@_ = ( &__getself->_EnabUseqqFeature(':spacedots')" ;
     }
     else { oops }
 
@@ -1316,6 +1320,34 @@ sub __subst_spacedots() {  # edits $_
     s{ }{\N{MIDDLE DOT}}g;
   }
 }
+
+our $COND_LB = "\N{LEFT DOUBLE PARENTHESIS}";
+our $COND_RB = "\N{RIGHT DOUBLE PARENTHESIS}";
+our $COND_MULT = "\N{MULTIPLICATION SIGN}";
+#my $singlechar_restr = "[^\\\\${COND_LB}${COND_RB}]";
+my $singlechar_restr = "[^\\\\${COND_LB}${COND_RB}${COND_MULT}]";
+
+sub __condense_strings($) {  # edits $_
+  if (/^"/) {
+    my $minrep_m1 = $_[0] - 1;
+
+    # Special case a string of nul represented as \n\n\n...\00n (n=0..7)
+    # D::D generates this to avoid ambiguity if a digit follows
+    s<( (\\([0-7])){$minrep_m1,}\\00\g{-1} )>
+     < $COND_LB."${2}${COND_MULT}".((length($1)-2)/length($2)).$COND_RB >xge;
+
+    # \0 \1 ... if there is no digit following, which makes it ambiguous
+    s<( (\\\d) \g{-1}{$minrep_m1,} ) (?![0-7]) >
+     < $COND_LB."${2}${COND_MULT}".(length($1)/length($2)).$COND_RB >xge;
+
+    # \x for almost any x besides a digit or \
+    s<( ($singlechar_restr | \\\D | \\[0-3][0-7][0-7] | \\x\{[^\{\}]+\})
+        \g{-1}{$minrep_m1,} )
+     >
+     < $COND_LB."${2}${COND_MULT}".(length($1)/length($2)).$COND_RB >xge;
+  }
+}
+
 sub __nums_with_underscores() {
   if (looks_like_number($_)) {
     while( s/^([^\._]*?\d)(\d\d\d)(?=$|\.|_)/$1_$2/ ) { }
@@ -1342,6 +1374,7 @@ sub _postprocess_DD_result {
     = @$self{qw/Debug _Listform Foldwidth Foldwidth1/};
   my $useqq = $self->Useqq();
   my $unesc_unicode = $useqq =~ /utf|unic/;
+  my $condense_strings = $useqq =~ /cond/;
   my $controlpics   = $useqq =~ /pic/;
   my $spacedots     = $useqq =~ /space/;
   my $underscores   = $useqq =~ /_/;
@@ -1370,6 +1403,7 @@ sub _postprocess_DD_result {
     __unesc_unicode          if $unesc_unicode;
     __subst_controlpic_backesc      if $controlpics;
     __subst_spacedots        if $spacedots;
+    __condense_strings(8)    if $condense_strings;
     __change_quotechars($qq) if $qq;
     __nums_with_underscores  if $underscores;
 
@@ -2410,6 +2444,14 @@ set C<Useqq> to just "unicode";
 =item "spacedots"
 
 Space characters are shown as '·' (Middle Dot).
+
+=item "condense"
+
+Condense long strings.  For example, 42 repeated 'A's appear as "⸨Ax42⸩".
+
+=item "underscores"
+
+Show numbers with '_' seprating groups of 3 digits.
 
 =item "qq"
 

@@ -242,7 +242,12 @@ my $DQ = '"';
 
 diag "##DEBUG at line ",__LINE__;
 
-my %toplex_h = ("" => "Emp", A=>111,"B B"=>222,C=>{d=>888,e=>999},D=>{},EEEEEEEEEEEEEEEEEEEEEEEEEE=>\42,F_long_enough_to_force_wrap_FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF=>\\\43, G=>qr/foo.*bar/xsi);
+my %toplex_h = ("" => "Emp",
+                A => 111,"B B" => 222,C => {d => 888,e => 999},
+                D => {},EEEEEEEEEEEEEEEEEEEEEEEEEE => \42, # reference to 42
+                F_long_enough_to_force_wrap_FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF => "\\\43",  # string containing \#
+                G => qr/foo.*bar/xsi
+               );
    # EEE... identifer is long to force linewrap
 my @toplex_a = (0,1,"C",\%toplex_h,[],[0..9]);
 my $toplex_ar = \@toplex_a;
@@ -564,7 +569,7 @@ q!%toplex_h=(
   D => {},
   EEEEEEEEEEEEEEEEEEEEEEEEEE => \\42,
   F_long_enough_to_force_wrap_FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
-    => \\\\\\43,
+    => "\\\\#",
   G => qr/foo.*bar/six
 )!,
   dvis('%toplex_h');
@@ -589,6 +594,38 @@ timed_run {
         dvis('@backtrack_bugtest_data');
 } 0.10; # some cpan test machines are slow!
 diag "##DEBUG at line ",__LINE__;
+
+sub vis_sans_quotes($) {
+  my $r = visnew->Useqq("unicode")->vis($_[0]);
+  $r =~ s/^"(.*)"$/$1/ or oops;
+  $r
+}
+
+{ my @items = (qw/A Z 8 9 ? ! @ $ % ^ & * ( ) _ - = + . ? : ; > < ./,
+                "#", ",", "\0", "\1", "\x{80}", "\x{C0}", "\x{FF}", "\\",
+              );
+  my $repcount = 20;
+  for my $before_item ("X", "0") { # Can't test \0 bc it becomes \000
+    for my $after_item ("Z", "\0", "0") {
+      for my $item (@items) {
+        my $before = $before_item eq $item ? "" : $before_item;
+        my $after  = $after_item  eq $item ? "" : $after_item;
+        my $str = $before.($item x $repcount).$after;
+        my $exp = '"'.vis_sans_quotes($before)
+                 .$Data::Dumper::Interp::COND_LB
+                 .vis_sans_quotes($item)
+                 .$Data::Dumper::Interp::COND_MULT.$repcount
+                 .$Data::Dumper::Interp::COND_RB
+                 .vis_sans_quotes($after).'"';
+        my $got = visnew->Useqq("condense")->vis($str);
+        like($got, $exp, "condense",
+            visnew->Useqq("unicode")->dvis('$before $item $after $str'));
+      }
+    }
+  }
+}
+#[ __LINE__, q($condensible_string), qq(condensible_string="⸨Ax20⸩⸨8x20⸩⸨9x20⸩⸨?x20⸩⸨.x20⸩⸨,x20⸩⸨\0x20⸩⸨\177x20⸩⸨\377x20⸩) ],
+
 
 sub doquoting($$) {
   my ($input, $useqq) = @_;
@@ -753,7 +790,7 @@ sub get_closure(;$) {
      [__LINE__, q($/\n), qq(\$/=\"\\n\"\n) ],
     )),
     [__LINE__, q($\\\n), qq(\$\\=undef\n) ],
-    [__LINE__, q($"\n), qq(\$\"=\" \"\n) ],
+    [__LINE__, q($"\n), qq(\$\"=\"${SS}\"\n) ],
     [__LINE__, q($~\n), qq(\$~=\"STDOUT\"\n) ],
     #20 :
     [__LINE__, q($^\n), qq(\$^=\"STDOUT_TOP\"\n) ],
@@ -761,7 +798,7 @@ sub get_closure(;$) {
      [__LINE__, q($:\n), qq(\$:=\" \N{SYMBOL FOR NEWLINE}-\"\n) ],
      [__LINE__, q($^L\n), qq(\$^L=\"\N{SYMBOL FOR FORM FEED}\"\n) ],
     ):(
-     [__LINE__, q($:\n), qq(\$:=\" \\n-\"\n) ],
+     [__LINE__, q($:\n), qq(\$:=\"${SS}\\n-\"\n) ],
     )),
     [__LINE__, q($?\n), qq(\$?=0\n) ],
     [__LINE__, q($[\n), qq(\$[=0\n) ],
@@ -774,10 +811,10 @@ sub get_closure(;$) {
     [__LINE__, q($;\n), qq(\$;=\"\\34\"\n) ],
     #[__LINE__, q($;\n), qq(\$;=\"\\x{1C}\"\n) ],
     [__LINE__, q(@ARGV\n), qq(\@ARGV=(\"fake\",\"argv\")\n) ],
-    [__LINE__, q($ENV{EnvVar}\n), qq(\$ENV{EnvVar}=\"Test EnvVar Value\"\n) ],
-    [__LINE__, q($ENV{$EnvVarName}\n), qq(\$ENV{\$EnvVarName}=\"Test EnvVar Value\"\n) ],
-    [__LINE__, q(@_\n), <<'EOF' ],  # N.B. Foldwidth was set to 72
-@_=(
+    [__LINE__, q($ENV{EnvVar}\n), qq(\$ENV{EnvVar}=\"Test${SS}EnvVar${SS}Value\"\n) ],
+    [__LINE__, q($ENV{$EnvVarName}\n), qq(\$ENV{\$EnvVarName}=\"Test${SS}EnvVar${SS}Value\"\n) ],
+    [__LINE__, q(@_\n), <<EOF ],  # N.B. Foldwidth was set to 72
+\@_=(
   42,
   [
     0,
@@ -786,12 +823,12 @@ sub get_closure(;$) {
     {
       "" => "Emp",
       A => 111,
-      "B B" => 222,
+      "B${SS}B" => 222,
       C => {d => 888,e => 999},
       D => {},
-      EEEEEEEEEEEEEEEEEEEEEEEEEE => \42,
+      EEEEEEEEEEEEEEEEEEEEEEEEEE => \\42,
       F_long_enough_to_force_wrap_FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
-        => \\\43,
+        => "\\\\#",
       G => qr/foo.*bar/six
     },
     [],
@@ -803,7 +840,7 @@ EOF
     (CPICS_DEFAULT ? (
      [__LINE__, q($@\n), qq(\$\@=\"FAKE DEATH\N{SYMBOL FOR NEWLINE}\"\n) ],
     ):(
-     [__LINE__, q($@\n), qq(\$\@=\"FAKE DEATH\\n\"\n) ],
+     [__LINE__, q($@\n), qq(\$\@=\"FAKE${SS}DEATH\\n\"\n) ],
     )),
     #37 :
     map({
@@ -829,12 +866,12 @@ EOF
 ${pfx}\%${dollar}${name}_h${r}=(
 ${p}  "" => "Emp",
 ${p}  A => 111,
-${p}  "B B" => 222,
+${p}  "B${SS}B" => 222,
 ${p}  C => {d => 888,e => 999},
 ${p}  D => {},
 ${p}  EEEEEEEEEEEEEEEEEEEEEEEEEE => \\42,
 ${p}  F_long_enough_to_force_wrap_FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
-${p}    => \\\\\\43,
+${p}    => "\\\\#",
 ${p}  G => qr/foo.*bar/six
 ${p})
 EOF
@@ -847,12 +884,12 @@ ${p}  "C",
 ${p}  {
 ${p}    "" => "Emp",
 ${p}    A => 111,
-${p}    "B B" => 222,
+${p}    "B${SS}B" => 222,
 ${p}    C => {d => 888,e => 999},
 ${p}    D => {},
 ${p}    EEEEEEEEEEEEEEEEEEEEEEEEEE => \\42,
 ${p}    F_long_enough_to_force_wrap_FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
-${p}      => \\\\\\43,
+${p}      => "\\\\#",
 ${p}    G => qr/foo.*bar/six
 ${p}  },
 ${p}  [],
@@ -965,7 +1002,7 @@ EOF
       my $actual;
       my $dollarat_val = $@;
       eval { $@ = $dollarat_val;
-        # Verify that special vars are preserved and don't affect Data::Dumper::Interp
+        # Verify that special vars are preserved and don't affect DDI
         # (except if testing a punctuation var, then don't change it's value)
 
         my ($origAt,$origFs,$origBs,$origComma,$origBang,$origCarE,$origCarW)
@@ -984,6 +1021,9 @@ EOF
         ($@, $/, $\, $,, $!, $^E, $^W)
           = ($fakeAt,$fakeFs,$fakeBs,$fakeCom,$fakeBang,$fake_cE,$fake_cW);
 
+#say "XXX dvis_input='${dvis_input}'";
+        # 12/13/2023 now dvis enables :spacedots by default
+        # but our test setup can not deal with that
         $actual = $use_oo
            ? Data::Dumper::Interp->new()->dvis($dvis_input)
            : dvis($dvis_input);
@@ -1020,7 +1060,8 @@ EOF
       # if there are any Unicode characters present.
       # So we can not test single-quoted mode in those cases
       next
-        if !$useqq && $input =~ tr/\0-\377//c;
+        #if !$useqq && $input =~ tr/\0-\377//c;
+        if !$useqq && $input =~ /\P{PosixGraph}/a;
       my $exp = doquoting($input, $useqq);
       my $act = Data::Dumper::Interp->new()->Useqq($useqq)->vis($input);
       oops "\n\nUseqq ",u($useqq)," bug:\n"

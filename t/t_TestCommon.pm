@@ -622,13 +622,16 @@ our $bs = '\\';  # a single backslash
 sub _expstr2restr($) {
   local $_ = shift;
   confess "bug" if ref($_);
+  return $_ if $_ eq "";
   # In \Q *string* \E the *string* may not end in a backslash because
   # it would be parsed as (\\)(E) instead of (\)(\E).
   # So change them to a unique token and later replace problematic
   # instances with ${bs} variable references.
   s/\\/<BS>/g;
   $_ = '\Q' . $_ . '\E';
-  s#([\$\@\%])#\\E\\$1\\Q#g;
+  s#([\$\@\%]+)# do{ local $_ = $1;
+                     join "", '\\E', (map{ "\\$_" } split(//,$_)), '\\Q'
+                   } #eg;
 
   if (m#qr/#) {
     # Canonical: qr/STUFF/MODIFIERS
@@ -682,7 +685,7 @@ sub expstr2re($) {
   wantarray ? ($xdesc, $output) : $output
 }
 
-# check $test_desc, string_or_regex, result
+# mycheck $test_desc, string_or_regex, result
 sub mycheck($$@) {
   my ($desc, $expected_arg, @actual) = @_;
   local $_;  # preserve $1 etc. for caller
