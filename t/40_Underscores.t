@@ -9,7 +9,7 @@ $Data::Dumper::Interp::Debug = $debug if $debug;
 
 $Data::Dumper::Interp::Foldwidth = 40;
 
-$Data::Dumper::Interp::Useqq .= ":_";
+$Data::Dumper::Interp::Useqq .= ":underscores";
 
 for my $left_digit (1..9) {
   my $val = 0;

@@ -515,7 +515,7 @@ sub _generate_sub($;$) {
   my $basename = $1;  # avis, hvis, ivis, dvis, or vis
   my $N = s/(\d+)// ? $1 : undef;
   my %mod = map{$_ => 1} split //, $_;
-  delete $mod{"_"}; # ignore underscores
+  delete $mod{"_"}; # ignore underscores in names
 
   if (($Debug//0) > 1) {
     warn "## (D=$Debug) methname=$methname base=$basename \$_=$_\n";
@@ -566,6 +566,7 @@ sub _generate_sub($;$) {
     my $useqq = "";
     $useqq .= ":unicode:controlpics" if delete $mod{c};
     $useqq .= ":condense"            if delete $mod{C};
+    $useqq .= ":underscores"         if delete $mod{u};
     $code .= '->Debug(2)'     if delete $mod{d};
     $code .= "->Maxdepth($N)" if defined($N);
     $code .= '->Objects(0)'   if delete $mod{o};
@@ -1379,7 +1380,7 @@ sub _postprocess_DD_result {
   my $condense_strings = $useqq =~ /cond/;
   my $controlpics   = $useqq =~ /pic/;
   my $spacedots     = $useqq =~ /space/;
-  my $underscores   = $useqq =~ /_/;
+  my $underscores   = $useqq =~ /under/;
   my $qq            = $useqq =~ /qq(?:=(..))?/ ? ($1//'{}') : '';
   my $pad = $self->Pad() // "";
 
@@ -1778,7 +1779,8 @@ sub _postprocess_DD_result {
   }
   elsif (index($listform,'l') >= 0) {
     # show as a bare list without brackets
-    $outstr =~ s/\A(?:${addrvis_re})?[\[\{]// && $outstr =~ s/[\]\}]\z//s or oops;
+    $outstr =~ s/\A(?:${addrvis_re})?\[(.*)\]\z/$1/;
+    $outstr =~ s/\A(?:${addrvis_re})?\{(.*)\}\z/$1/;
     # or a single string without "quote marks"
     $outstr =~ s/\A"(.*)"\z/$1/;
   }
@@ -2259,11 +2261,14 @@ B<c> - Show control characters as "Control Picture" characters
 
 B<C> - condense strings with repeated characters
 
+B<u> - show numbers with underscores between groups of three digits
+
 =back
 
 Functions must be imported explicitly
-unless they are imported by default (see list below)
-or created via the :all tag.
+unless they are imported by default (see list below).
+
+=for HIDE or created via the :all tag.
 
 To avoid having to import functions in advance, you can
 use them as methods and import only the C<visnew> function:
@@ -2288,32 +2293,32 @@ via the AUTOLOAD mechanism).
  addrvis addrvisl
  u quotekey qsh qshlist qshpath
 
-=head2 The :all import tag
-Z<> Z<>
-
-  use Data::Dumper::Interp qw/:all/;
-
-This generates and imports methods uing all possible combinations of
-I<< <NUMBER> >>,C<l>,C<o>,C<q>, and C<r>,
-in alphabetical order, with NUMBER <= 2.
-There are 119 variations, too many to remember.
-
-You only need to know the basic names
-
-  ivis, dvis, vis, avis, and hvis
-
-and the possible suffixes and their
-order (I<< <NUMBER> >>,C<l>,C<o>,C<q>,C<r>).
-
-For example, one function is C<< B<avis2lq> >>, which
-
- * Formats multiple arguments as an array ('avis')
- * Decends at most 2 levels into structures ('2')
- * Returns a comma-separated list *without* parenthesis ('l')
- * Shows strings in single-quoted form ('q')
-
-You could have used alternate names for the same function such as C<avis2ql>,
-C<q2avisl>, C<q_2_avis_l> etc. if called as methods or explicitly imported.
+=for HIDE =head2 The :all import tag
+=for HIDE Z<> Z<>
+=for HIDE
+=for HIDE   use Data::Dumper::Interp qw/:all/;
+=for HIDE
+=for HIDE This generates and imports methods uing all possible combinations of
+=for HIDE I<< <NUMBER> >>,C<l>,C<o>,C<q>, and C<r>,
+=for HIDE in alphabetical order, with NUMBER <= 2.
+=for HIDE There are 119 variations, too many to remember.
+=for HIDE
+=for HIDE You only need to know the basic names
+=for HIDE
+=for HIDE   ivis, dvis, vis, avis, and hvis
+=for HIDE
+=for HIDE and the possible suffixes and their
+=for HIDE order (I<< <NUMBER> >>,C<l>,C<o>,C<q>,C<r>).
+=for HIDE
+=for HIDE For example, one function is C<< B<avis2lq> >>, which
+=for HIDE
+=for HIDE  * Formats multiple arguments as an array ('avis')
+=for HIDE  * Decends at most 2 levels into structures ('2')
+=for HIDE  * Returns a comma-separated list *without* parenthesis ('l')
+=for HIDE  * Shows strings in single-quoted form ('q')
+=for HIDE
+=for HIDE You could have used alternate names for the same function such as C<avis2ql>,
+=for HIDE C<q2avisl>, C<q_2_avis_l> etc. if called as methods or explicitly imported.
 
 * To save memory, only stub declarations with prototypes are generated
 for imported functions.
@@ -2476,11 +2481,10 @@ Repeated sequences in strings are shown as "⸨I<char>xI<repcount>⸩".
 For example
 
   vec(my $s, 31, 1) = 1;
-  my ($binstr) = unpack "b*", $s;
-  say $binstr;
-  say visnew->Useqq("unicode:condense")->visl($binstr);
-  --> 00000000000000000000000000000001
-  --> ⸨0×31⸩1
+  say unpack "b*", ~$s;
+  say visnew->Useqq("unicode:condense")->visl(unpack "b*", ~$s);
+    -->11111111111111111111111111111110
+    -->⸨1×31⸩0
 
 =item "underscores"
 
