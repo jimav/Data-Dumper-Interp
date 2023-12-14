@@ -519,9 +519,9 @@ sub displaystr($) {
   my ($input) = @_;
   return "undef" if ! defined($input);
   local $_;
-  state $utf8_output = grep /utf.?8/i, PerlIO::get_layers(*STDOUT, output=>1);
+  state $utf_output = grep /utf/i, PerlIO::get_layers(*STDOUT, output=>1);
   my $r = rawstr($input);
-  if (! $utf8_output && $input =~ /[^[:print:]]/a) {
+  if (! $utf_output && $input =~ /[^[:print:]]/a) {
     # Data::Dumper will show 'wide' characters as hex escapes
     my $dd = Data::Dumper->new([$input])->Useqq(1)->Terse(1)->Indent(0)->Dump;
     if ($dd ne $input && $dd ne "\"$input\"") {

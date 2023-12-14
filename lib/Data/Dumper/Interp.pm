@@ -75,6 +75,8 @@ our %EXPORT_TAGS = (
 
 sub _generate_sub($;$); # forward
 
+our ($COND_LB, $COND_RB, $COND_MULT, $LQ, $RQ);
+
 #---------------------------------------------------------------------------
 my $sane_cW = $^W;
 my $sane_cH = $^H;
@@ -215,7 +217,7 @@ sub _dbshow(_) {
               : _dbvis($v)               # something else
 }
 our $_dbmaxlen = 300;
-sub _dbrawstr(_) { "«".(length($_[0])>$_dbmaxlen ? substr($_[0],0,$_dbmaxlen-3)."..." : $_[0])."»" }
+sub _dbrawstr(_) { "${LQ}".(length($_[0])>$_dbmaxlen ? substr($_[0],0,$_dbmaxlen-3)."..." : $_[0])."${RQ}" }
 sub _dbstr($) {
   local $_ = shift;
   return "undef" if !defined;
@@ -1321,15 +1323,10 @@ sub __subst_spacedots() {  # edits $_
   }
 }
 
-our $COND_LB = "\N{LEFT DOUBLE PARENTHESIS}";
-our $COND_RB = "\N{RIGHT DOUBLE PARENTHESIS}";
-our $COND_MULT = "\N{MULTIPLICATION SIGN}";
-#my $singlechar_restr = "[^\\\\${COND_LB}${COND_RB}]";
-my $singlechar_restr = "[^\\\\${COND_LB}${COND_RB}${COND_MULT}]";
-
 sub __condense_strings($) {  # edits $_
   if (/^"/) {
     my $minrep_m1 = $_[0] - 1;
+    my $singlechar_restr = "[^\\\\${COND_LB}${COND_RB}${COND_MULT}]";
 
     # Special case a string of nul represented as \n\n\n...\00n (n=0..7)
     # D::D generates this to avoid ambiguity if a digit follows
@@ -1385,6 +1382,22 @@ sub _postprocess_DD_result {
 
   my $maxlinelen = $foldwidth1 || $foldwidth || INT_MAX;
   my $maxlineNlen = ($foldwidth // INT_MAX) - length($pad);
+
+  state $utf_output = grep /utf/i, PerlIO::get_layers(*STDOUT, output=>1);
+  if ($unesc_unicode && $utf_output) {
+    # Probably it's safe to use wide characters
+    $COND_LB = "\N{LEFT DOUBLE PARENTHESIS}";
+    $COND_RB = "\N{RIGHT DOUBLE PARENTHESIS}";
+    $COND_MULT = "\N{MULTIPLICATION SIGN}";
+    $LQ = "«";
+    $RQ = "»";
+  } else {
+    $COND_LB = "(";
+    $COND_RB = ")";
+    $COND_MULT = "x";
+    $LQ = "<<";
+    $RQ = ">>";
+  }
 
   if ($debug) {
     our $_dbmaxlen = INT_MAX;
@@ -1855,7 +1868,7 @@ sub _Interpolate {
       }
       else {
         if (/^.+?(?<!\\)([\$\@\%])/) {
-          confess __PACKAGE__." bug: Missed '$1' in «$_»"
+          confess __PACKAGE__." bug: Missed '$1' in ${LQ}$_${RQ}"
         }
         # Due to the need to simplify the big regexp above, \x{abcd} is now
         # split into "\x" and "{abcd}".  Combine consecutive pass-thrus
@@ -1876,7 +1889,7 @@ sub _Interpolate {
         $e = "Invalid expression syntax starting at '$leftover' in $funcname arg"
       } else {
         # Otherwise we may have a parser bug
-        $e = "Invalid expression (or ".__PACKAGE__." bug):\n«$leftover»";
+        $e = "Invalid expression (or ".__PACKAGE__." bug):\n${LQ}$leftover${RQ}";
       }
       carp "$e\n";
       push @pieces, ['p',"<INVALID EXPRESSION>".$leftover];
