@@ -12,6 +12,7 @@ use strict; use warnings FATAL => 'all'; use utf8;
 use 5.018;  # lexical_subs
 use feature qw(say state lexical_subs current_sub);
 use feature 'lexical_subs';
+use feature 'unicode_strings';
 
 no warnings "experimental::lexical_subs";
 
@@ -484,13 +485,14 @@ sub __getself_h {
 
 sub _EnabUseqqFeature {
   # Append <feature> to Useqq ONLY if Useqq has not been changed
-  # (indicated by "(parens)" in the value -- see $Useqq = ... )
+  # (indicated by "<pointy brackets>" in the value -- see $Useqq = ... )
   # Does nothing unless the default enables extended features.
   my ($self, $feature) = @_;
   my $curr = $self->Useqq;
   return $self if length($curr//"") <= 1
                     || substr($curr,0,1) ne "<"
                     || substr($curr,-1,1) ne ">";
+#btw '###ENABLE CHANGING Useqq; curr=', _dbvis($curr), "  \$Useqq=$Useqq";
   $self->Useqq($curr.$feature)
 }
 
@@ -509,7 +511,8 @@ sub _generate_sub($;$) {
   s/alvis/avisl/;  # backwards compat.
   s/hlvis/hvisl/;  # backwards compat.
 
-  s/^[^diha]*\K(?:lvis|visl)/avisl/; # 'visl' same as 'avisl' for bw compat.
+  # NOW visl means something else.
+  #s/^[^diha]*\K(?:lvis|visl)/avisl/; # 'visl' same as 'avisl' for bw compat.
 
   s/([ahid]?vis)// or error "can not infer the basic function";
   my $basename = $1;  # avis, hvis, ivis, dvis, or vis
@@ -520,10 +523,10 @@ sub _generate_sub($;$) {
   if (($Debug//0) > 1) {
     warn "## (D=$Debug) methname=$methname base=$basename \$_=$_\n";
   }
-  if ($basename =~ /^[id]/) {
-    error "'$1' is inapplicable to $basename" if /([ahl])/;
-  }
-  error "'$1' mis-placed: Only allowed as '${1}vis'" if /([ahi])/;
+##  if ($basename =~ /^[id]/) {
+##    error "'$1' is inapplicable to $basename" if /([ahl])/;
+##  }
+##  error "'$1' mis-placed: Only allowed as '${1}vis'" if /([ahi])/;
 
 
   # All these subs can be called as either or methods or functions.
@@ -566,14 +569,17 @@ sub _generate_sub($;$) {
     my $useqq = "";
     $useqq .= ":unicode:controlpics" if delete $mod{c};
     $useqq .= ":condense"            if delete $mod{C};
+    $code .= '->Debug(2)'            if delete $mod{d};
+    $useqq .= ":hex"                 if delete $mod{h};
+    $code .= '->Objects(0)'          if delete $mod{o};
+    $useqq .= ":octets"              if delete $mod{O};
+    $code .= '->Refaddr(1)'          if delete $mod{r};
     $useqq .= ":underscores"         if delete $mod{u};
-    $code .= '->Debug(2)'     if delete $mod{d};
-    $code .= "->Maxdepth($N)" if defined($N);
-    $code .= '->Objects(0)'   if delete $mod{o};
-    $code .= '->Refaddr(1)'   if delete $mod{r};
 
     $code .= "->Useqq(\$Useqq.'${useqq}')" if $useqq ne "";
     $code .= "->Useqq(0)"     if delete $mod{q};
+
+    $code .= "->Maxdepth($N)" if defined($N);
 
     if ($basename =~ /^([id])vis/) {
       $code .= ", shift, '$1' ); goto &_Interpolate }";
@@ -1270,9 +1276,9 @@ sub __unesc_unicode() {  # edits $_
     # so is considered "Graphical", but we want to see it as hex rather
     # than "", and probably any other "Format" category Unicode characters.
 
-    s/
+    s{
        \G (?: [^\\]++ | \\[^x] )*+ \K (?<w> \\x\x{7B} (?<hex>[a-fA-F0-9]+) \x{7D} )
-     /
+     }{
        my $orig = $+{w};
        local $_ = hex( length($+{hex}) > 6 ? '0' : $+{hex} );
        $_ = $_ > 0x10FFFF ? "\0" : chr($_); # 10FFFF is Unicode limit
@@ -1280,7 +1286,30 @@ sub __unesc_unicode() {  # edits $_
        # choice of case when escaping wide characters.
        (m<\P{XPosixGraph}|[\0-\177]>
           || m<\p{General_Category=Format}>) ? lc($orig) : $_
-     /xesg;
+     }xesg;
+  }
+}
+
+my %ctlesc2codepoint = (
+  '\\a' => ord("\a"),
+  '\\b' => ord("\b"),
+  '\\t' => ord("\t"),
+  '\\n' => ord("\n"),
+  '\\f' => ord("\f"),
+  '\\r' => ord("\r"),
+  '\\e' => ord("\e"),
+);
+sub __unesc_nonoctal () {  # edits $_
+  # Change backslash escapes like \n back to octal escapes.
+  # This is to better visualize binary octet streams
+  if (/^"/) {
+    s{
+       \G (?: [^\\]++ | \\[x0-7] )*+ \K (?<w> \\[abtnfre])(?<digitnext>\d?)
+     }{
+      $+{digitnext}
+        ? sprintf("\\%03o", ($ctlesc2codepoint{$+{w}} // oops))
+        : sprintf("\\%01o", ($ctlesc2codepoint{$+{w}} // oops))
+     }xesg;
   }
 }
 
@@ -1351,6 +1380,11 @@ sub __condense_strings($) {  # edits $_
   }
 }
 
+sub __nums_in_hex() {
+  if (looks_like_number($_)) {
+    s/^([1-9]\d+)$/ sprintf("%#x", $1) /e; # Leave single-digit numbers as-is
+  }
+}
 sub __nums_with_underscores() {
   if (looks_like_number($_)) {
     while( s/^([^\._]*?\d)(\d\d\d)(?=$|\.|_)/$1_$2/ ) { }
@@ -1378,6 +1412,8 @@ sub _postprocess_DD_result {
   my $useqq = $self->Useqq();
   my $unesc_unicode = $useqq =~ /utf|unic/;
   my $condense_strings = $useqq =~ /cond/;
+  my $octet_strings = $useqq =~ /octet/;
+  my $nums_in_hex   = $useqq =~ /hex/;
   my $controlpics   = $useqq =~ /pic/;
   my $spacedots     = $useqq =~ /space/;
   my $underscores   = $useqq =~ /under/;
@@ -1420,10 +1456,12 @@ sub _postprocess_DD_result {
 
     __unmagic_atom ;
     __unesc_unicode          if $unesc_unicode;
+    __unesc_nonoctal         if $octet_strings;
     __subst_controlpic_backesc      if $controlpics;
     __subst_spacedots        if $spacedots;
     __condense_strings(8)    if $condense_strings;
     __change_quotechars($qq) if $qq;
+    __nums_in_hex            if $nums_in_hex;
     __nums_with_underscores  if $underscores;
 
     if ($prepending) { $_ = $prepending . $_; $prepending = ""; }
@@ -1779,10 +1817,10 @@ sub _postprocess_DD_result {
   }
   elsif (index($listform,'l') >= 0) {
     # show as a bare list without brackets
-    $outstr =~ s/\A(?:${addrvis_re})?\[(.*)\]\z/$1/;
-    $outstr =~ s/\A(?:${addrvis_re})?\{(.*)\}\z/$1/;
+    $outstr =~ s/\A(?:${addrvis_re})?\[(.*)\]\z/$1/s;
+    $outstr =~ s/\A(?:${addrvis_re})?\{(.*)\}\z/$1/s;
     # or a single string without "quote marks"
-    $outstr =~ s/\A"(.*)"\z/$1/;
+    $outstr =~ s/\A"(.*)"\z/$1/s;
   }
 
   # Insert user-specified padding after each embedded newline
@@ -2223,43 +2261,32 @@ The available modifier characters are:
 
 B<l> - omit parenthesis to return a bare list with "avis" or "hvis"; omit quotes from a string formatted by "vis".
 
-B<o> - show object internals
+B<o> - show object internals (see C<Objects>);
 
-=over
 
-Calling B<< Objects(0) >> using the OO api has the same effect.
+B<r> - show abbreviated addresses of refs (see C<Refaddr>).
 
-=back
+B<< <NUMBER> >> - limit structure depth to <NUMBER> levels (see C<Maxdepth>).
+
+See C<Useqq> for more info about these:
+
+B<c> - Show control characters as "Control Picture" characters
+
+B<C> - condense strings of repeated characters
+
+B<h> - show numbers > 9 in hexadecimal
+
+B<O> - Optimize for strings containing binary octets.
 
 B<q> - show strings 'single quoted' if possible
 
 =over
 
-Internally, Data::Dumper is called with C<Useqq(0)>, but depending
+With B<q> Data::Dumper is called with C<Useqq(0)>, but depending
 on the version of Data::Dumper the result may be "double quoted"
 anyway if wide characters are present.
 
 =back
-
-B<r> - show abbreviated addresses of objects and other refs
-
-=over
-
-Calling B<< Refaddr(1) >> using the OO api has the same effect.
-
-=back
-
-B<< <NUMBER> >> - limit nested structure depth to <NUMBER> levels
-
-=over
-
-Calling B<< Maxdepth(NUMBER) >> using the OO api has the same effect.
-
-=back
-
-B<c> - Show control characters as "Control Picture" characters
-
-B<C> - condense strings with repeated characters
 
 B<u> - show numbers with underscores between groups of three digits
 
@@ -2470,6 +2497,11 @@ Every character occupies the same space with a fixed-width font, but
 the tiny "control picures" can be hard to read;
 to see traditional \n etc.  while still seeing wide characters as themselves,
 set C<Useqq> to just "unicode";
+
+=item "octets"
+
+Optimize for viewing binary strings (i.e. strings of octets, not "wide"
+characters).  Octal escapes are shown instead of \n, \r, etc.
 
 =item "spacedots"
 
