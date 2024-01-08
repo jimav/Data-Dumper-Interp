@@ -684,7 +684,7 @@ sub _Do {
   $truncsuffix //= "...";
   if (ref($objects) eq "HASH") {
     for (qw/show_classname objects/) {
-      croak "Objects value is a hashref but '${_}' key is missing\n"
+      confess "Objects value is a hashref but '${_}' key is missing\n"
         unless exists $objects->{$_};
     }
     $show_classname = $objects->{show_classname};
