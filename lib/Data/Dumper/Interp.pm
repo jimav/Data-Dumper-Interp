@@ -84,7 +84,7 @@ my $sane_cH = $^H;
 our @save_stack;
 sub _SaveAndResetPunct() {
   # Save things which will later be restored
-  push @save_stack, [ $@, $!+0, $^E+0, $,, $/, $\, $?, $^W ];
+  push @save_stack, [ $@, $!+0, $^E+0, $., $,, $/, $\, $?, $^W ];
   # Reset sane values
   $,  = "";       # output field separator is null string
   $/  = "\n";     # input record separator is newline
@@ -94,7 +94,7 @@ sub _SaveAndResetPunct() {
   #$^H = $sane_cH; # our load-time pragmas (strict etc.)
 }
 sub _RestorePunct_NoPop() {
-  ( $@, $!, $^E, $,, $/, $\, $?, $^W ) = @{ $save_stack[-1] };
+  ( $@, $!, $^E, $., $,, $/, $\, $?, $^W ) = @{ $save_stack[-1] };
 }
 sub _RestorePunct() {
   &_RestorePunct_NoPop;
