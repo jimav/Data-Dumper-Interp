@@ -496,6 +496,11 @@ sub _EnabUseqqFeature {
   $self->Useqq($curr.$feature)
 }
 
+sub _utfoutput() {
+  # Delay testing STDOUT until the first actual call which needs to know
+  state $utf_output = grep /utf/i, PerlIO::get_layers(*STDOUT, output=>1);
+}
+
 sub _generate_sub($;$) {
   my ($arg, $proto_only) = @_;
   (my $methname = $arg) =~ s/.*:://;
@@ -561,7 +566,7 @@ sub _generate_sub($;$) {
       $code .= " { \@_ = ( &__getself" ;
     }
     elsif ($basename eq "dvis") {
-      $code .= " { \@_ = ( &__getself->_EnabUseqqFeature(':spacedots:condense')" ;
+      $code .= " { \@_ = ( &__getself->_EnabUseqqFeature(_utfoutput() ? ':spacedots:condense' : ':condense')" ;
       #$code .= " { \@_ = ( &__getself->_EnabUseqqFeature(':spacedots')" ;
     }
     else { oops }
@@ -1425,8 +1430,7 @@ sub _postprocess_DD_result {
   my $maxlinelen = $foldwidth1 || $foldwidth || INT_MAX;
   my $maxlineNlen = ($foldwidth // INT_MAX) - length($pad);
 
-  state $utf_output = grep /utf/i, PerlIO::get_layers(*STDOUT, output=>1);
-  if ($unesc_unicode && $utf_output) {
+  if ($unesc_unicode && _utfoutput()) {
     # Probably it's safe to use wide characters
     $COND_LB = "\N{LEFT DOUBLE PARENTHESIS}";
     $COND_RB = "\N{RIGHT DOUBLE PARENTHESIS}";
