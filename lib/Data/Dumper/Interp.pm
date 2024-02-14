@@ -484,9 +484,9 @@ sub __getself_h {
 }
 
 sub _EnabUseqqFeature {
-  # Append <feature> to Useqq ONLY if Useqq has not been changed
-  # (indicated by "<pointy brackets>" in the value -- see $Useqq = ... )
-  # Does nothing unless the default enables extended features.
+  # Append <feature> to Useqq ONLY if Useqq has not been changed from the
+  # default (indicated by "<pointy brackets>" -- see setting of $Useqq = ... )
+  # AND the default enables some extended features.
   my ($self, $feature) = @_;
   my $curr = $self->Useqq;
   return $self if length($curr//"") <= 1
@@ -2517,8 +2517,8 @@ Repeated sequences in strings are shown as "⸨I<char>xI<repcount>⸩".
 For example
 
   vec(my $s, 31, 1) = 1;
-  say unpack "b*", ~$s;
-  say visnew->Useqq("unicode:condense")->visl(unpack "b*", ~$s);
+  say unpack "b*", $s;
+  say visnew->Useqq("unicode:condense")->visl(unpack "b*", $s);
     -->11111111111111111111111111111110
     -->⸨1×31⸩0
 
@@ -2534,8 +2534,9 @@ Show using Perl's qq{...} or qqX...Y syntax, rather than "double quotes".
 
 =back
 
-The default is C<Useqq('unicode')> except for
-functions/methods with 'q' in their name, which force C<Useqq(0)>.
+The default is C<Useqq('unicode')> except for C<dvis> which also
+enables 'condense' and, if STDOUT is a utf-encoding handle, 'spacedots'.
+Functions/methods with 'q' in their name force C<Useqq(0)>;
 
 =head2 Quotekeys
 
