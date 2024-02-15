@@ -516,7 +516,7 @@ sub _generate_sub($;$) {
   s/alvis/avisl/;  # backwards compat.
   s/hlvis/hvisl/;  # backwards compat.
 
-  # NOW visl means something else.
+  # Discontinued because NOW visl means something else.
   #s/^[^diha]*\K(?:lvis|visl)/avisl/; # 'visl' same as 'avisl' for bw compat.
 
   s/([ahid]?vis)// or error "can not infer the basic function";
@@ -574,7 +574,7 @@ sub _generate_sub($;$) {
     my $useqq = "";
     $useqq .= ":unicode:controlpics" if delete $mod{c};
     $useqq .= ":condense"            if delete $mod{C};
-    $code .= '->Debug(2)'            if delete $mod{d};
+    $code .= '->Debug(2)'            if delete $mod{D};
     $useqq .= ":hex"                 if delete $mod{h};
     $code .= '->Objects(0)'          if delete $mod{o};
     $useqq .= ":octets"              if delete $mod{O};
@@ -582,6 +582,9 @@ sub _generate_sub($;$) {
     $useqq .= ":underscores"         if delete $mod{u};
 
     $code .= "->Useqq(\$Useqq.'${useqq}')" if $useqq ne "";
+
+    $code .= "->_EnabUseqqFeature(_utfoutput() ? ':spacedots:condense' : ':condense')" if delete($mod{d}) or $basename eq "dvis";
+
     $code .= "->Useqq(0)"     if delete $mod{q};
 
     $code .= "->Maxdepth($N)" if defined($N);
@@ -1820,9 +1823,9 @@ sub _postprocess_DD_result {
     $outstr =~ s/\A(?:${addrvis_re})?\{/(/ && $outstr =~ s/\}\z/)/s or oops;
   }
   elsif (index($listform,'l') >= 0) {
-    # show as a bare list without brackets
-    $outstr =~ s/\A(?:${addrvis_re})?\[(.*)\]\z/$1/s;
-    $outstr =~ s/\A(?:${addrvis_re})?\{(.*)\}\z/$1/s;
+    # show as a bare list without brackets; the brackets might be on own lines.
+    $outstr =~ s/\A(?:${addrvis_re})?\[\s*(.*?)\s*\]\z/$1/s;
+    $outstr =~ s/\A(?:${addrvis_re})?\{\s*(.*?)\s*\}\z/$1/s;
     # or a single string without "quote marks"
     $outstr =~ s/\A"(.*)"\z/$1/s;
   }
@@ -2278,6 +2281,8 @@ B<c> - Show control characters as "Control Picture" characters
 
 B<C> - condense strings of repeated characters
 
+B<d> - ("debug-friendly") Condense strings; show spaces as middle-dot if STDOUT is utf-encoding
+
 B<h> - show numbers > 9 in hexadecimal
 
 B<O> - Optimize for strings containing binary octets.
@@ -2535,7 +2540,7 @@ Show using Perl's qq{...} or qqX...Y syntax, rather than "double quotes".
 =back
 
 The default is C<Useqq('unicode')> except for C<dvis> which also
-enables 'condense' and, if STDOUT is a utf-encoding handle, 'spacedots'.
+enables 'condense' and possibly 'spacedots'.
 Functions/methods with 'q' in their name force C<Useqq(0)>;
 
 =head2 Quotekeys
