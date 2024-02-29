@@ -631,10 +631,13 @@ sub _get_terminal_width() {  # returns undef if unknowable
     local *_; # Try to avoid clobbering special filehandle "_"
     # This does not actualy work; https://github.com/Perl/perl5/issues/19142
 
-    my $fh = -t STDERR ? *STDERR :
-             -t STDOUT ? *STDOUT :
-             -t STDIN  ? *STDIN  :
-        do{my $fh; for("/dev/tty",'CONOUT$') { last if open $fh, $_ } $fh} ;
+    my $fh =
+      -t STDOUT ? *STDOUT :
+      -t STDERR ? *STDERR :
+       # under Windows the filehandle must be an *output* handle
+       do{my $fh; for("/dev/tty",'CONOUT$') { last if open $fh, $_ } $fh}
+         || (-t STDIN && *STDIN)
+       ;
     my ($width, $height);
     if ($fh) {
       # Some platforms (bsd?) carp if the terminal size can not be determined.
