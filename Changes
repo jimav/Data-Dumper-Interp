@@ -1,5 +1,6 @@
 (Recent) Revision history for Perl extension Data-Dumper-Interp
 
+7.005 - Windows portability; Rm multiple use VERSION (deprecated in perl 5.9)
 7.004 - 'd' method modifier ("debug friendly") enables 'condense' and, if
         STDOUT is a utf-encoding handle, 'spacedots'.  Always used by dvis.
 7.003 - Fix bug where $. was not preserved on first call (termwidth detection)
