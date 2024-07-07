@@ -46,7 +46,6 @@ use List::Util 1.45 qw(min max first none all any sum0);
 use Data::Structure::Util qw/circular_off/;
 use Regexp::Common qw/RE_balanced/;
 use Term::ReadKey ();
-use Capture::Tiny qw/capture_merged/;
 use overload ();
 
 ############################ Exports #######################################
@@ -647,11 +646,12 @@ sub _get_terminal_width() {  # returns undef if unknowable
       # "stty" directly prints "stdin is not a tty" which we can not trap.
       # Probably this is a bug in Term::Readkey where it should redirect
       # such messages to /dev/null.  So we have to do it here.
-      () = capture_merged {
+      require Capture::Tiny;
+      () = Capture::Tiny::capture_merged(sub{
         delete local $INC{__WARN__};
         delete local $INC{__DIE__};
         ($width, $height) = eval{ Term::ReadKey::GetTerminalSize($fh) };
-      }
+      });
     }
     return $width; # possibly undef (sometimes seems to be zero ?!?)
   }
