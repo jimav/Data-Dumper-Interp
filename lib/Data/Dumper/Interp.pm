@@ -417,10 +417,9 @@ sub __win_forceqsh(_) {
   # parameter to a command typed to cmd.com in Windows.
   # However parameter parameter parsing is implemented within each command
   # and there is no universal ruleset.   For example Strawberry perl
-  # appears to split parameters on white space only whereas (as I understand
-  # it) Windows commands, at least built-in ones, split words on any of
+  # appears to split parameters on white space only, whereas (as I understand)
+  # Windows commands, at least built-in ones, split words on any of
   # space tab , ; or = and all those must be protected, see
-  #
   #    https://ss64.com/nt/syntax-esc.html
   #
   # For the moment at least, qsh "quotes" words so they come through when
