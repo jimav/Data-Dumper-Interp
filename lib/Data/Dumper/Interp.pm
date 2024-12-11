@@ -204,9 +204,10 @@ sub _tf($) { $_[0] ? "T" : "F" }
 sub _showfalse(_) { $_[0] ? $_[0] : 0 }
 sub _dbvisnew($) {
   my $v = shift;
-  Data::Dumper->new([$v])->Terse(1)->Indent(0)->Quotekeys(0)->Useqq(1)
-              #->Useperl(1)
+  Data::Dumper->new([$v])->Terse(1)->Indent(0)->Quotekeys(0)
+              ->Sortkeys(1)->Useqq(1)
               ###->Sortkeys(\&__sortkeys)->Pair("=>")
+              #->Useperl(1)
 }
 sub _dbvis(_) {chomp(my $s=_dbvisnew(shift)->Useqq(1)->Dump); $s }
 sub _dbvisq(_){chomp(my $s=_dbvisnew(shift)->Useqq(0)->Dump); $s }
@@ -682,7 +683,7 @@ my  $my_maxdepth;
 our $my_visit_depth = 0;
 
 my ($maxstringwidth, $truncsuffix, $objects, $opt_refaddr, $listform, $debug);
-my ($sortkeys, $show_classname);
+my ($sortkeys, $show_classname, $show_overloaded);
 
 sub _Do {
   oops unless @_ == 1;
@@ -697,15 +698,17 @@ sub _Do {
 
   $maxstringwidth = 0 if ($maxstringwidth //= 0) >= INT_MAX;
   $truncsuffix //= "...";
+  $show_classname = $show_overloaded = 1;
   if (ref($objects) eq "HASH") {
-    for (qw/show_classname objects/) {
-      confess "Objects value is a hashref but '${_}' key is missing\n"
-        unless exists $objects->{$_};
+    foreach my $key (keys %$objects) {
+      if ($key eq 'show_classname') { $show_classname = $objects->{$key} }
+      elsif ($key eq 'show_overloaded') { $show_overloaded = $objects->{$key} }
+      elsif ($key eq 'Objects') { }
+      else {
+        confess "Objects hashref value has unknown key '$key'\n";
+      }
     }
-    $show_classname = $objects->{show_classname};
-    $objects = $objects->{objects};
-  } else {
-    $show_classname = 1;
+    $objects = $objects->{objects} // (ref($Objects) ? 1 : $Objects);
   }
   $objects = [ $objects ] unless ref($objects //= []) eq 'ARRAY';
 
@@ -817,7 +820,7 @@ btw '@@@repl item is obj ',$item if $debug;
       }
       last CHECKObject
         unless $enabled;
-      if (overload::Overloaded($item)) {
+      if ($show_overloaded && overload::Overloaded($item)) {
 btw '@@@repl obj is overloaded' if $debug;
         # N.B. Overloaded(...) also returns true if it's a NAME of an
         # overloaded package; should not happen in this case.
