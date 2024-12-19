@@ -1002,6 +1002,13 @@ sub visit_ref {
     return $item
   }
 
+  # Show 'CODE<040:6f0>' instead of ksub{ "DUMMY" }'
+  if (ref($item) eq 'CODE' && ! $self->Deparse()) {
+    $item = _MAGIC_NOQUOTES_PFX.addrvis($item);
+    say "!       CODEref without DEPARSE, returning ",_dbvis2($item) if $debug;
+    return $item;
+  }
+
   # First descend into the structure, probably returning a clone
   local $my_visit_depth = $my_visit_depth + 1;
   my $nitem = $self->SUPER::visit_ref($item);
@@ -2259,7 +2266,7 @@ with pre- and post-processing to "improve" the results:
 
 =over 2
 
-=item * One line if possible, else folded to terminal with, WITHOUT newline.
+=item * One line if possible, else folded to terminal width, WITHOUT newline.
 
 =item * Safely printable Unicode characters appear as themselves.
 
@@ -2596,7 +2603,7 @@ Space characters are shown as '·' (Middle Dot).
 
 =item "condense"
 
-Repeated sequences in strings are shown as "⸨I<char>xI<repcount>⸩".
+Repeated characters in strings are shown as "⸨I<char>xI<repcount>⸩".
 For example
 
   vec(my $s, 31, 1) = 1;

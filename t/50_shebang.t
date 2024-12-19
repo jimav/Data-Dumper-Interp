@@ -34,6 +34,8 @@ BEGIN{ diag "after  use Data::Compare etc."; } # try to find mystery Windows cra
 
 diag "executing at line ".__LINE__; # try to find mystery Windows crash
 
+sub mk_addrvis_re($) { qr/^\Q$_[0]\E<[0-9a-f:,]+>$/ }
+
 # This test mysteriously dies (exit 255) with no visible message
 # on certain Windows machines.  Try to explicitly 'fail' instead of
 # actually dieing.
@@ -392,12 +394,14 @@ diag "Now at line ".__LINE__."\n"; # try to find mystery Windows crash
 
 # Check Deparse support
 { my $data = $test_sub;
-  { my $code = 'vis($data)'; mycheck $code, 'sub { "DUMMY" }', eval $code; }
+  #{ my $code = 'vis($data)'; mycheck $code, 'sub { "DUMMY" }', eval $code; }
+  # Now non-Deparsed code refs show as addrvis
+  { my $code = 'vis($data)'; mycheck $code, mk_addrvis_re("CODE"), eval $code; }
   local $Data::Dumper::Interp::Deparse = 1;
   { my $code = 'vis($data)'; mycheck $code, qr/sub \{\s*my \$x = 42;\s*\}/, eval $code; }
 }
 { my $data = $test_sub_withproto;
-  { my $code = 'vis($data)'; mycheck $code, 'sub { "DUMMY" }', eval $code; }
+  { my $code = 'vis($data)'; mycheck $code, mk_addrvis_re("CODE"), eval $code; }
   local $Data::Dumper::Interp::Deparse = 1;
   { my $code = 'vis($data)'; mycheck $code, qr/sub \(\@\) \{\s*my \$x = 42;\s*\}/, eval $code; }
 }
