@@ -26,6 +26,8 @@ BEGIN {
 use vars qw/$addrvis_ndigits $addrvis_seen $addrvis_dec_abbrs/;
 my $addrvis_re = qr/[A-Za-z][:\w]*\<\d+:[\da-fA-F]+\>/;
 
+use Test2::Require::Module 'threads';  # skip entire test if not available on this platform
+use Test2::Require::Module 'threads::shared';
 use threads;
 use threads::shared;
 
