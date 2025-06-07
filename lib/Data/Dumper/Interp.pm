@@ -77,8 +77,8 @@ our @EXPORT    = qw( visnew
 
 our @EXPORT_OK = qw(addrvis_digits
 
-                    $Debug $MaxStringwidth $Truncsuffix $Objects $Foldwidth
-                    $Useqq $Quotekeys $Sortkeys
+                    $Debug $MaxStringwidth $Trunctailwidth $Truncsuffix
+                    $Objects $Foldwidth $Useqq $Quotekeys $Sortkeys
                     $Maxdepth $Maxrecurse $Deparse $Deepcopy);
 
 our %EXPORT_TAGS = (
@@ -252,30 +252,56 @@ sub _dbstrposn($$) {
 
 #################### Configuration Globals #################
 
-our ($Debug, $MaxStringwidth, $Truncsuffix, $Objects,
+our ($Debug, $MaxStringwidth, $Truncsuffix, $Trunctailwidth, $Objects,
      $Refaddr, $Foldwidth, $Foldwidth1,
      $Useqq, $Quotekeys, $Sortkeys,
      $Maxdepth, $Maxrecurse, $Deparse, $Deepcopy);
 
-$Debug          = 0            unless defined $Debug;
-$MaxStringwidth = 0            unless defined $MaxStringwidth;
-$Truncsuffix    = "..."        unless defined $Truncsuffix;
-$Objects        = 1            unless defined $Objects;
-$Refaddr        = 0            unless defined $Refaddr;
-$Foldwidth      = undef        unless defined $Foldwidth;  # undef auto-detects
-$Foldwidth1     = undef        unless defined $Foldwidth1; # override for 1st
+sub _reset_defaults() {
+  $Debug          = 0            unless defined $Debug;
+  $MaxStringwidth = 0            unless defined $MaxStringwidth;
+  $Truncsuffix    = "..."        unless defined $Truncsuffix;
+  $Trunctailwidth = 0            unless defined $Trunctailwidth;
+  $Objects        = 1            unless defined $Objects;
+  $Refaddr        = 0            unless defined $Refaddr;
+  $Foldwidth      = undef        unless defined $Foldwidth;  # undef auto-detects
+  $Foldwidth1     = undef        unless defined $Foldwidth1; # override for 1st
 
-# The following override Data::Dumper defaults
-# Initial D::D values are captured once when we are first loaded.
+  # The following override Data::Dumper defaults
+  # Initial D::D values are captured once when we are first loaded.
 
-#$Useqq          = "<unicode:controlpic>" unless defined $Useqq;
-$Useqq          = "<unicode>"    unless defined $Useqq;
-$Quotekeys      = 0            unless defined $Quotekeys;
-$Sortkeys       = \&__sortkeys unless defined $Sortkeys;
-$Maxdepth       = $Data::Dumper::Maxdepth   unless defined $Maxdepth;
-$Maxrecurse     = $Data::Dumper::Maxrecurse unless defined $Maxrecurse;
-$Deparse        = 0            unless defined $Deparse;
-$Deepcopy       = 0            unless defined $Deepcopy;
+  #$Useqq          = "<unicode:controlpic>" unless defined $Useqq;
+  $Useqq          = "<unicode>"    unless defined $Useqq;
+  $Quotekeys      = 0            unless defined $Quotekeys;
+  $Sortkeys       = \&__sortkeys unless defined $Sortkeys;
+  $Maxdepth       = $Data::Dumper::Maxdepth   unless defined $Maxdepth;
+  $Maxrecurse     = $Data::Dumper::Maxrecurse unless defined $Maxrecurse;
+  $Deparse        = 0            unless defined $Deparse;
+  $Deepcopy       = 0            unless defined $Deepcopy;
+}
+_reset_defaults(); # at startup
+
+# This user-callable function (or method) restores default defaults
+# Mainly useful after calling visnew->set_defaults()
+sub reset_defaults() {
+  undef $Debug;
+  undef $MaxStringwidth;
+  undef $Truncsuffix;
+  undef $Trunctailwidth;
+  undef $Objects;
+  undef $Refaddr;
+  undef $Foldwidth;  # undef auto-detects
+  undef $Foldwidth1; # override for 1st
+
+  undef $Useqq;
+  undef $Quotekeys;
+  undef $Sortkeys;
+  undef $Maxdepth;
+  undef $Maxrecurse;
+  undef $Deparse;
+  undef $Deepcopy;
+  _reset_defaults();
+}
 
 #################### Methods #################
 
@@ -306,6 +332,7 @@ has dd => (
 has Debug          => (is=>'rw', default => sub{ $Debug                 });
 has MaxStringwidth => (is=>'rw', default => sub{ $MaxStringwidth        });
 has Truncsuffix    => (is=>'rw', default => sub{ $Truncsuffix           });
+has Trunctailwidth => (is=>'rw', default => sub{ $Trunctailwidth        });
 has Objects        => (is=>'rw', default => sub{ $Objects               });
 has Refaddr        => (is=>'rw', default => sub{ $Refaddr               });
 has Foldwidth      => (is=>'rw', default => sub{
@@ -317,11 +344,33 @@ has Foldwidth      => (is=>'rw', default => sub{
 has Foldwidth1     => (is=>'rw', default => sub{ $Foldwidth1            });
 has _Listform      => (is=>'rw');
 
+sub _SetDefaults {
+    my $self = shift;
+    $Debug = $self->Debug();
+    $MaxStringwidth = $self->MaxStringwidth();
+    $Truncsuffix = $self->Truncsuffix();
+    $Trunctailwidth = $self->Trunctailwidth();
+    $Objects = $self->Objects();
+    $Refaddr = $self->Refaddr();
+    $Foldwidth = $self->Foldwidth();
+    $Foldwidth1 = $self->Foldwidth1();
+    $Quotekeys = $self->Quotekeys();
+    # These from from the Data::Dumper object, via wrappers
+    $Useqq = $self->Useqq();
+    $Quotekeys = $self->Quotekeys();
+    $Maxdepth = $self->Maxdepth();
+    $Maxrecurse = $self->Maxrecurse();
+    $Sortkeys = $self->Sortkeys();
+    $Deparse = $self->Deparse();
+    $Deepcopy = $self->Deepcopy();
+    return $self
+}
+
 # Make "setters" return the outer object $self
 around       [qw/Values Useqq Quotekeys Trailingcomma Pad Varname Quotekeys
                  Maxdepth Maxrecurse Useperl Sortkeys Deparse Deepcopy
 
-                 Debug MaxStringwidth Truncsuffix Objects Refaddr
+                 Debug MaxStringwidth Truncsuffix Trunctailwidth Objects Refaddr
                  Foldwidth Foldwidth1 _Listform
                 /] => sub{
   my $orig = shift;
@@ -550,7 +599,7 @@ sub _generate_sub($;$) {
   # Discontinued because NOW visl means something else.
   #s/^[^diha]*\K(?:lvis|visl)/avisl/; # 'visl' same as 'avisl' for bw compat.
 
-  s/([ahid]?vis)// or error "can not infer the basic function";
+  s/([ahid]?vis|set_defaults)// or error "can not infer the basic function";
   my $basename = $1;  # avis, hvis, ivis, dvis, or vis
   my $N = s/(\d+)// ? $1 : undef;
   my %mod = map{$_ => 1} split //, $_;
@@ -590,6 +639,9 @@ sub _generate_sub($;$) {
     my $listform = delete($mod{l}) ? 'l' : 'h';
     $code .= " { &__getself_h->_Listform('${listform}')";
   }
+  elsif ($basename eq "set_defaults") {
+    $code .= " { &__getself" ;
+  }
   elsif ($basename eq "ivis") {
     $code .= " { \@_ = ( &__getself" ;
   }
@@ -597,7 +649,7 @@ sub _generate_sub($;$) {
     $code .= " { \@_ = ( &__getself->_EnabUseqqFeature(_utfoutput() ? ':spacedots:condense' : ':condense')" ;
     #$code .= " { \@_ = ( &__getself->_EnabUseqqFeature(':spacedots')" ;
   }
-  else { oops }
+  else { oops "basename=",u($basename) }
 
   my $useqq = "";
   $useqq .= ":unicode:controlpics" if delete $mod{c};
@@ -619,6 +671,9 @@ sub _generate_sub($;$) {
 
   if ($basename =~ /^([id])vis/) {
     $code .= ", shift, '$1' ); goto &_Interpolate }";
+  }
+  elsif ($basename eq 'set_defaults') {
+    $code .= "->_SetDefaults }";
   } else {
     $code .= "->_Do }";
   }
@@ -708,7 +763,8 @@ use constant {
 my  $my_maxdepth;
 our $my_visit_depth = 0;
 
-my ($maxstringwidth, $truncsuffix, $objects, $opt_refaddr, $listform, $debug);
+my ($maxstringwidth, $truncsuffix, $trunctailwidth, $objects,
+    $opt_refaddr, $listform, $debug);
 my ($sortkeys, $ovopt);
 
 sub _Do {
@@ -718,12 +774,13 @@ sub _Do {
   local $_;
   &_SaveAndResetPunct;
 
-  ($maxstringwidth, $truncsuffix, $objects, $opt_refaddr, $listform, $debug)
-    = @$self{qw/MaxStringwidth Truncsuffix Objects Refaddr _Listform Debug/};
+  ($maxstringwidth, $truncsuffix, $trunctailwidth, $objects, $opt_refaddr, $listform, $debug)
+    = @$self{qw/MaxStringwidth Truncsuffix Trunctailwidth Objects Refaddr _Listform Debug/};
   $sortkeys = $self->Sortkeys;
 
   $maxstringwidth = 0 if ($maxstringwidth //= 0) >= INT_MAX;
   $truncsuffix //= "...";
+  $trunctailwidth = min($trunctailwidth//0, $maxstringwidth);
   $ovopt = "tagged";
   if (ref($objects) eq "HASH") {
     foreach my $key (keys %$objects) {
@@ -962,8 +1019,10 @@ btw '@@@repl prefixed item:',$item if $debug;
   # Truncacte overly-long strings
   elsif ($maxstringwidth && !_show_as_number($item)
          && length($item) > $maxstringwidth + length($truncsuffix)) {
-btw '@@@repl truncating ',substr($item,0,10),"..." if $debug;
-    $item = "".substr($item,0,$maxstringwidth).$truncsuffix;
+    my $tail_offset = length($item) - $trunctailwidth;
+btw '@@@repl truncating ',substr($item,0,10),"...","[ msw=$maxstringwidth l=",length($item)," ttw=$trunctailwidth to=$tail_offset]" if $debug;
+    #$item = "".substr($item,0,$maxstringwidth).$truncsuffix;
+    $item = "".substr($item,0,$maxstringwidth-$trunctailwidth).$truncsuffix.substr($item,$tail_offset,$trunctailwidth);
   }
   $item
 }#visit_value
@@ -2507,9 +2566,8 @@ Like C<addrvis> but omits the <angle brackets>.
 
 =head2 visnew()
 
-These create an object initialized from the global configuration
+These synonyms create an object initialized from the global configuration
 variables listed below.  No arguments are permitted.
-C<visnew> is simply a shorthand.
 
 B<All the functions described above> and any variations
 may be called as I<methods> on an object
@@ -2528,7 +2586,7 @@ returns the same string as
 
    $msg = visnew->Foldwidth(40)->vis_r2($x); # show addresses; Maxdepth 2
 
-=head1 Configuration Variables / Methods
+=head1 Configuration Methods & Variables
 
 These work the same way as variables/methods in Data::Dumper.
 
@@ -2543,8 +2601,13 @@ the object is returned so that calls can be chained.
 
 =head2 Truncsuffix(I<"...">)
 
+=head2 Trunctailwidth(I<INTEGER>)
+
 Longer strings are truncated and I<Truncsuffix> appended.
-MaxStringwidth=0 (the default) means no limit.
+MaxStringwidth=0 (the default) means no length limit.
+
+If I<Trunctailwidth> is set, characters are deleted from the middle, leaving
+that many characters from the end of the string.
 
 =head2 Foldwidth(I<INTEGER>)
 
@@ -2693,6 +2756,23 @@ Functions/methods with 'q' in their name force C<Useqq(0)>;
 =head2 Deepcopy
 
 See C<Data::Dumper> documentation.
+
+=head1 B<set_defaults> Method
+
+As an alternative to directly setting the global variables listed above,
+the corresponding I<methods> can be called on an object
+and finally the C<set_defaults> method, which stores whatever settings are in the
+object back into the global variables.  For example
+
+  visnew->MaxStringwidth(50)->Refaddr(1)->set_defaults();
+
+would set the C<$Data::Dumper::Interp::MaxStringwidth>
+and <$Data::Dumper::Interp::Refaddr>
+variables, without risk of uncaught spelling errors.
+
+=head2 B<reset_defaults>
+
+The C<reset_defaults> method sets all Configuration variables to original default values.
 
 =head1
 
