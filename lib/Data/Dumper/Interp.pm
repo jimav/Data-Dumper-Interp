@@ -54,7 +54,7 @@ use POSIX qw(INT_MAX);
 use Scalar::Util qw(blessed reftype refaddr looks_like_number weaken);
 use List::Util 1.45 qw(min max first none all any sum0);
 use Data::Structure::Util qw/circular_off/;
-use Regexp::Common qw/RE_balanced/;
+use Regexp::Common qw/RE_balanced RE_quoted/;
 use Term::ReadKey ();
 use Sub::Identify qw/sub_name sub_fullname get_code_location/;
 use File::Basename qw/basename/;
@@ -1362,6 +1362,8 @@ sub __sortkeys {
   $r
 }
 
+my $quoted_re = RE_quoted(-delim => q{'"});
+
 my $balanced_re = RE_balanced(-parens=>'{}[]()');
 
 # cf man perldata
@@ -1973,10 +1975,14 @@ sub _postprocess_DD_result {
   }
   elsif (index($listform,'l') >= 0) {
     # show as a bare list without brackets; the brackets might be on own lines.
-    $outstr =~ s/\A(?:${addrvis_re})?\[\s*(.*?)\s*\]\z/$1/s;
-    $outstr =~ s/\A(?:${addrvis_re})?\{\s*(.*?)\s*\}\z/$1/s;
-    # or a single string without "quote marks"
-    $outstr =~ s/\A"(.*)"\z/$1/s;
+    $outstr =~ s/\A(?:${addrvis_re})?\[\s*(.*?)\s*\]\z/$1/s
+    or
+    $outstr =~ s/\A(?:${addrvis_re})?\{\s*(.*?)\s*\}\z/$1/s
+    or
+    $outstr =~ s/\A(?:${addrvis_re})?\(\s*(.*?)\s*\)\z/$1/s # from 'a' conversion above
+    or
+    $outstr =~ s/\A${quoted_re}\z/substr($&,1,length($&)-2)/es # a single string without "quote marks"
+    ;
   }
 
   # Insert user-specified padding after each embedded newline
