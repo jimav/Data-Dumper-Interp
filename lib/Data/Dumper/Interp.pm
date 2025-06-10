@@ -411,8 +411,8 @@ sub _refaddrdechex($) {  # Returns just "<hex:dec>" (possibly marked as shared)
   my $refstr = ref($arg);
   my $addr;
   if ($refstr ne "") {
-    if (threads::shared->can("is_shared")
-           && defined(my $id = threads::shared::is_shared($arg))) {
+    if ($INC{"threads/shared.pm"}
+                    && defined(my $id = threads::shared::is_shared($arg))) {
       $addr = _ADDRVIS_SHARED_MARK.$id;
     } else {
       $addr = refaddr($arg)
@@ -2261,7 +2261,7 @@ sub DB_Vis_Eval($$) {
               );
   }
 
-  wantarray ? @result : (do{die "bug" if @result>1}, $result[0])
+  wantarray ? @result : (do{Carp::confess("bug",Data::Dumper::Interp::_dbavis(@result)) if @result>1}, $result[0])
 }# DB_Vis_Eval
 
 1;
@@ -2870,6 +2870,21 @@ Data::Dumper::Interp simply passes through these annotations.
 However with I<Refaddr(true)>, multiple references to the same thing
 will all show the address of the referenced thing.
 
+=item threads::shared support
+
+When the address of a shared variable is shown
+(e.d. when the B<Refaddr> option is enabled or if calling B<addrvis()>),
+the variable's I<globally unique ID> shown instead of the C<refaddr>.
+
+(The C<refaddr> of a shared variable is misleading it refers
+to a thread-local intermediary and may be different in
+each thread even though the same shared object is being referenced).
+
+Relatedly, the C<$VAR> references in default Data::Dumper output are
+generally incorrect when shared variables are involved because Data::Dumper
+uses only C<refaddr> values to identify refs to the same item.
+Enabling I<Refaddr(true)> will show linkage correctly, albiet in a different way.
+
 =item The special "_" stat filehandle may not be preserved
 
 Data::Dumper::Interp queries the operating
@@ -2952,6 +2967,12 @@ as numbers not 'quoted strings' and similarly for stringified objects.
 
 Although such differences might be immaterial to Perl during execution,
 they may be important when communicating to a human.
+
+=item *
+
+References to shared variables (see L<threads::shared>) are shown correctly
+with the C<Refaddr> feature.  Data::Dumper's C<$VAR> expressions are usually
+incorrect when shared variables are involved.
 
 =back
 
