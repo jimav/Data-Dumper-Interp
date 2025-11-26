@@ -828,15 +828,21 @@ sub clean_capture_output($) {
 
 sub my_capture(&) {
   my ($out, $err, @results) = &capture($_[0]);
-  return( clean_capture_output($out), clean_capture_output($err), @results );
+  $out = clean_capture_output($out);
+  $err = clean_capture_errput($err);
+  confess "my_capture: Must be called in list context to receive both stdout & err"
+    unless wantarray;
+  return( $out, $err, @results );
 }
 sub my_capture_merged(&) {
   my ($merged, @results) = &capture_merged($_[0]);
-  return( clean_capture_output($merged), @results );
+  $merged = clean_capture_output($merged);
+  return( wantarray ? ($merged, @results) : $merged );
 }
 sub my_tee_merged(&) {
   my ($merged, @results) = &tee_merged($_[0]);
-  return( clean_capture_output($merged), @results );
+  $merged = clean_capture_output($merged);
+  return( wantarray ? ($merged, @results) : $merged );
 }
 
 1;
