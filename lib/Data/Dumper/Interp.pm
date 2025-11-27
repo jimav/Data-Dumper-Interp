@@ -2594,7 +2594,7 @@ The following special import tags are available:
 =for HIDE C<q2avisl>, C<q_2_avis_l> etc. if called as methods or explicitly imported.
 
 
-=head1 RefArgFormatter
+=head2 RefArgFormatter
 
 Carp::RefArgFormatter may be set to a ref to this sub (or a wrapper)
 to format arguments using 'vis' in tracebacks (see L<Carp>).
