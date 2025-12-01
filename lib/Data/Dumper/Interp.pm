@@ -644,8 +644,9 @@ sub RefArgFormatter {
   my ($item, %opts) = @_;
   $opts{Maxdepth} //= 3;
   $opts{MaxStringwidth} //= 1000;
-  $opts{Refaddr} //= 1;
-  $opts{Objects} //= {objects => 1, overloads => "tagged"};
+  # Use whatever global defaults the user may have set...
+  #$opts{Refaddr} //= 1;
+  #$opts{Objects} //= {objects => 1, overloads => "tagged"};
   my $obj = Data::Dumper::Interp::visnew;
   for my $optname (keys %opts) {
     $obj->$optname($opts{$optname});
@@ -2112,6 +2113,14 @@ sub quotekey(_) { # Quote a hash key if not a valid bareword
             "\"$_[0]\""
 }
 
+sub _install_CarpRefArgFormatter() {
+  my $prev = $Carp::RefArgFormatter;
+  if ($prev && $prev != \&RefArgFormatter) {
+    croak("\$Carp::RefArgFormatter was previously set to another handler: $prev = ",visnew->vis($prev))
+  }
+  $Carp::RefArgFormatter = \&RefArgFormatter;
+}
+
 # Must be declared after global like $Debug etc.
 sub import {
   my $class = shift;
@@ -2131,7 +2140,11 @@ sub import {
     elsif (/^:DEFAULT/) {
       push @args, @EXPORT;
     }
+    elsif (/^:carp/) {
+      _install_CarpRefArgFormatter();
+    }
     elsif (/^:all/) {
+      _install_CarpRefArgFormatter();
       # Generate all modifier combinations as suffixes in alphabetical order.
       my %already = map{$_ => 1} @args;
       #WRONG: push @args, ":DEFAULT" unless $already{':DEFAULT'};
@@ -2381,10 +2394,11 @@ Data::Dumper::Interp - interpolate Data::Dumper output into strings for human co
   say Data::Dumper::Interp->new()
             ->MaxStringwidth(50)->Maxdepth($levels)->vis($datum);
 
-  #-------- CARP TRACEBACK FORMATTING --------
+  #-------- CARP RefArgFormatter --------
 
   use Carp;
   $Carp::RefArgFormatter = \&Data::Dumper::Interp::RefArgFormatter;
+  # Now ref arguments will be formatted in tracebacks
 
   # Now cluck and confess will format references with 'vis'
 
@@ -2560,7 +2574,10 @@ By default the following are imported:
 The following special import tags are available:
 
   :all - Imports all function variations, spelled with modifier
-         letters appended to the basic name in alphabetical order
+         letters appended to the basic name in alphabetical order.
+         Implies :carp
+
+  :carp - Format ref args in Carp tracebacks with C<vis> (installs $Carp::RefArgFormatter)
 
   :debug - Show functions/methods as they are generated
 

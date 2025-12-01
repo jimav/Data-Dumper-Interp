@@ -25,6 +25,17 @@ sub outer(@) {
 like(Data::Dumper::Interp::RefArgFormatter([1,2], Refaddr => 1),
      qr/^\<.*\>\[1,2\]$/, "direct RefArgFormatter call");
 
+sub check_no_CRFA_is_installed($) {
+  my ($tag) = @_;
+  my $s = outer(1,2,3);
+  oops unless defined $cluck_lno;
+  my $regex = qr/cluck arg at .*line $cluck_lno.*\n(?:.|\R)*inner\("foo", 1, 2, 3, SCALAR.*, *HASH.*called at.*${innercall_lno}/;
+  if ($s !~ $regex) {
+    like($s, $regex, "Default behavior without RFA ($tag)"); # will fail
+  }
+}
+check_no_CRFA_is_installed("initial");
+
 {
   local $Carp::RefArgFormatter = \&Data::Dumper::Interp::RefArgFormatter;
   my $s = outer(1,2,3);
@@ -42,11 +53,19 @@ like(Data::Dumper::Interp::RefArgFormatter([1,2], Refaddr => 1),
         "Carp::RefArgFormatter using curried Maxdepth => 1" );
 }
 
-{
+check_no_CRFA_is_installed("not persistent");
+
+# Check that :all and :carp tags set $Carp::RefArgFormatter
+# N.B. The 'eval' is needed because "use" otherwise executes import at
+# compile time
+for my $tag (':carp', ':all') {
+  eval "use Data::Dumper::Interp '${tag}';"; die "$@ " if $@;
   my $s = outer(1,2,3);
   like( $s,
-        qr/cluck arg at .*line $cluck_lno.*\n(?:.|\R)*inner\("foo", 1, 2, 3, SCALAR.*, *HASH.*called at.*${innercall_lno}/,
-        "Without Carp::RefArgFormatter" );
+        qr/cluck arg at .*line $cluck_lno.*\n(?:.|\R)*inner\("foo", 1, 2, 3, .*\\"YYY",.*\{data => .*?\[.*?\].*\}.*called at.*${innercall_lno}/,
+        "$tag import tag");
+  $Carp::RefArgFormatter = undef;
+  check_no_CRFA_is_installed("line ".__LINE__);
 }
 
 done_testing();
