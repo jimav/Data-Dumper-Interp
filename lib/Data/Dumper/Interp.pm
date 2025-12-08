@@ -54,7 +54,8 @@ use Scalar::Util qw(blessed reftype refaddr looks_like_number weaken);
 use List::Util 1.45 qw(min max first none all any sum0);
 use Data::Structure::Util qw/circular_off/;
 use Regexp::Common qw/RE_balanced RE_quoted/;
-use Term::ReadKey ();
+#use Term::ReadKey ();
+use Term::Size 0.211 ();
 use Sub::Identify qw/sub_name sub_fullname get_code_location/;
 use File::Basename qw/basename/;
 use overload ();
@@ -467,6 +468,7 @@ sub __win_forceqsh(_) {
   #  * \ quotes \ ONLY(?) if immediately followed by " or \"
   #    otherwise \\ means two backslashes.
   #FIXME TODO UNFINISHED
+  #TODO - rewrite using Win32::ShellQuote ???
   s/\\(?=")/\\\\/g;
   s/"/\\"/g;
   s/\\\z/\\\\/g; # because the closing " will follow
@@ -685,20 +687,22 @@ sub _get_terminal_width() {  # returns undef if unknowable
        ;
     my ($width, $height);
     if ($fh) {
-      # Some platforms (bsd?) carp if the terminal size can not be determined.
-      # We don't want to see any such warnings.  Also there might be a
-      # __WARN__ trap which we don't want to trigger
-      #
-      # Sigh.  It never ends!  On some platforms (different libc?)
-      # "stty" directly prints "stdin is not a tty" which we can not trap.
-      # Probably this is a bug in Term::Readkey where it should redirect
-      # such messages to /dev/null.  So we have to do it here.
-      require Capture::Tiny;
-      () = Capture::Tiny::capture_merged(sub{
-        delete local $SIG{__WARN__};
-        delete local $SIG{__DIE__};
-        ($width, $height) = eval{ Term::ReadKey::GetTerminalSize($fh) };
-      });
+       ($width, $height) = Term::Size::chars($fh);
+
+#      # Some platforms (bsd?) carp if the terminal size can not be determined.
+#      # We don't want to see any such warnings.  Also there might be a
+#      # __WARN__ trap which we don't want to trigger
+#      #
+#      # Sigh.  It never ends!  On some platforms (different libc?)
+#      # "stty" directly prints "stdin is not a tty" which we can not trap.
+#      # Probably this is a bug in Term::Readkey where it should redirect
+#      # such messages to /dev/null.  So we have to do it here.
+#      require Capture::Tiny;
+#      () = Capture::Tiny::capture_merged(sub{
+#        delete local $SIG{__WARN__};
+#        delete local $SIG{__DIE__};
+#        ($width, $height) = eval{ Term::ReadKey::GetTerminalSize($fh) };
+#      });
     }
     return $width; # possibly undef (sometimes seems to be zero ?!?)
   }
