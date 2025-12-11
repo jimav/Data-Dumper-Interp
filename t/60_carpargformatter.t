@@ -55,17 +55,32 @@ check_no_CRFA_is_installed("initial");
 
 check_no_CRFA_is_installed("not persistent");
 
-# Check that :all and :carp tags set $Carp::RefArgFormatter
+# Check that the :carp tag sets $Carp::RefArgFormatter
 # N.B. The 'eval' is needed because "use" otherwise executes import at
 # compile time
-for my $tag (':carp', ':all') {
-  eval "use Data::Dumper::Interp '${tag}';"; die "$@ " if $@;
+{
+  eval "use Data::Dumper::Interp ':carp';"; die "$@ " if $@;
+  is($Carp::RefArgFormatter, \&Data::Dumper::Interp::RefArgFormatter, ":carp tag");
   my $s = outer(1,2,3);
   like( $s,
         qr/cluck arg at .*line $cluck_lno.*\n(?:.|\R)*inner\("foo", 1, 2, 3, .*\\"YYY",.*\{data => .*?\[.*?\].*\}.*called at.*${innercall_lno}/,
-        "$tag import tag");
+        ":carp import tag");
   $Carp::RefArgFormatter = undef;
   check_no_CRFA_is_installed("line ".__LINE__);
+}
+
+# v7.023 - :all is no longer supposed to imply :carp
+{
+  package Other;
+  use bignum;
+  use Data::Dumper::Interp ':all';
+  use Test2::V0;
+  main::check_no_CRFA_is_installed("line ".__LINE__);
+  my $data = [1,2,3];
+  like(vis($data),qr/\[\(Math::.*\)1,\(Math::.*\)2,\(Math::.*\)3\]/,"vis with bugnums");
+  like(viso($data), qr/\[\W*bless\b.*1.*,\W*bless\b.*2.*,\W*bless\b.*3.*\]/s, "viso with bugnums");
+
+  package main;
 }
 
 done_testing();
