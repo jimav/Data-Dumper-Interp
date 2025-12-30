@@ -1054,7 +1054,7 @@ sub visit_ref {
     my $subname = sub_fullname($item);
     if ($subname =~ /__ANON__/) {  # add more info
       my ($file, $line) = get_code_location($item);
-      $subname .= " from ".basename($file).":$line";
+      $subname .= "\@".basename($file).":$line";
     }
     $item = _MAGIC_NOQUOTES_PFX.'\&'.$subname;
     say "!       CODEref without DEPARSE, returning ",_dbvis2($item) if $debug;
@@ -2995,8 +2995,8 @@ Printable Unicode characters appear as themselves instead of \x{ABCD}.
 Note: If your data contains 'wide characters', you should
 C<< use open IO => ':locale'; >> or otherwise arrange to
 encode the output for your terminal.
-You'll also want C<< use utf8; >> if your Perl source
-contains characters outside the ASCII range.
+You'll also want C<< use utf8; >> if your Perl source is written
+using utf8 characters outside the ASCII range.
 
 Undecoded binary octets (e.g. data read from a 'binmode' file)
 will still be escaped as individual bytes.
@@ -3038,7 +3038,7 @@ For example "A.20" sorts before "A.100".
 
 Numbers and strings which look like numbers are kept distinct when displayed,
 i.e. "0" does not become 0 or vice-versa. Floating-point values are shown
-as numbers not 'quoted strings' and similarly for stringified objects.
+as numbers not 'quoted strings'.
 
 Although such differences might be immaterial to Perl during execution,
 they may be important when communicating to a human.
