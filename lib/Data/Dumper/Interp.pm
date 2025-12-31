@@ -47,6 +47,7 @@ BEGIN {
 }
 use if $bitwise_supported, "feature", "bitwise";
 
+use re qw/is_regexp regexp_pattern/;
 use Data::Dumper ();
 use Carp;
 use POSIX qw(INT_MAX);
@@ -862,7 +863,9 @@ btw '@@@repl item is obj ',$item if $debug;
       my $enabled;
       OSPEC:
       foreach my $ospec (@$objects) {
-        if (ref($ospec) eq "Regexp") {
+        #if (ref($ospec) eq "Regexp")
+        if (is_regexp($ospec))
+        {
           my @stack = ($class);
           my %seen;
           while (my $c = shift @stack) {
