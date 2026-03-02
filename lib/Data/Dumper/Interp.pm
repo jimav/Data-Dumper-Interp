@@ -216,7 +216,7 @@ sub _reset_defaults() {
   # Initial D::D values are captured once when we are first loaded.
 
   #$Useqq          = "<unicode:controlpic>" unless defined $Useqq;
-  $Useqq          = "<unicode>"    unless defined $Useqq;
+  $Useqq          = "unicode"    unless defined $Useqq;
   $Quotekeys      = 0            unless defined $Quotekeys;
   $Sortkeys       = \&__sortkeys unless defined $Sortkeys;
   $Maxdepth       = $Data::Dumper::Maxdepth   unless defined $Maxdepth;
@@ -273,7 +273,7 @@ has dd => (
                 /],
 );
 
-# Config values which have no counter part in Data::Dumper
+# Config values which have no counterpart in Data::Dumper
 has Debug          => (is=>'rw', default => sub{ $Debug                 });
 has MaxStringwidth => (is=>'rw', default => sub{ $MaxStringwidth        });
 has Truncsuffix    => (is=>'rw', default => sub{ $Truncsuffix           });
@@ -1045,7 +1045,8 @@ sub visit_ref {
   # Data::Dumper's Maxdepth() option will not work as we intend.
   # Therefore we implement Maxdepth ourself
   if ($my_visit_depth >= $my_maxdepth) {
-    oops unless $my_visit_depth == $my_maxdepth;
+    oops "vd=$my_visit_depth maxd=$my_maxdepth debug=",_dbvis($debug)," item=",_dbshow($item),"\n   self=",_dbvis($self)
+      unless $my_visit_depth == $my_maxdepth;
     $item = _MAGIC_NOQUOTES_PFX.addrvis($item);
     say "!       maxdepth reached, returning ",_dbvis2($item) if $debug;
     return $item
@@ -1505,15 +1506,39 @@ use constant {
 };
 use constant _WRAP_STYLE => (_WRAP_ALLHASH);
 
+sub _get_useqq_set_widechars {
+  my ($self) = @_;
+  my $useqq = $self->Useqq();
+  if ($useqq) {
+
+    carp "WARNING: The Useqq specification string ",_dbvis($useqq)," contains a non-ASCII character but 'use utf8;' was not in effect when the literal was compiled; the intended chracter was probably not used.\n"
+      if $useqq =~ /[^\x{0}-\x{7F}]/ && !utf8::is_utf8($useqq);
+
+    my $unesc_unicode = $useqq =~ /utf|unic/;
+    if ($unesc_unicode && _utfoutput()) {
+      # STDOUT is using a UTF encoding -- wide characters should be safe
+      $COND_LB = "\N{LEFT DOUBLE PARENTHESIS}";   # left bracket for 'condense' form
+      $COND_RB = "\N{RIGHT DOUBLE PARENTHESIS}";
+      $COND_MULT = "\N{MULTIPLICATION SIGN}";
+      $LQ = "«";
+      $RQ = "»";
+    } else {
+      $COND_LB = "(";
+      $COND_RB = ")";
+      $COND_MULT = "x";
+      $LQ = "<<";
+      $RQ = ">>";
+    }
+  }
+  return $useqq;
+}
+
 sub _postprocess_DD_result {
   (my $self, local $_, my $original) = @_;
   no warnings 'recursion';
   my ($debug, $listform, $foldwidth, $foldwidth1)
     = @$self{qw/Debug _Listform Foldwidth Foldwidth1/};
-  my $useqq = $self->Useqq();
-
-  carp "WARNING: The Useqq specification string ",_dbvis($useqq)," contains a non-ASCII character but 'use utf8;' was not in effect when the literal was compiled; the intended chracter was probably not used.\n"
-    if $useqq =~ /[^\x{0}-\x{7F}]/ && !utf8::is_utf8($useqq);
+  my $useqq = $self->_get_useqq_set_widechars();
 
   my ($unesc_unicode,$condense_strings,$octet_strings,$nums_in_hex,
       $controlpics,$showspaces,$underscores,$q_pfx,$q_lq,$q_rq);
@@ -1548,21 +1573,6 @@ sub _postprocess_DD_result {
 
   my $maxlinelen = $foldwidth1 || $foldwidth || INT_MAX;
   my $maxlineNlen = ($foldwidth // INT_MAX) - length($pad);
-
-  if ($unesc_unicode && _utfoutput()) {
-    # Probably it's safe to use wide characters
-    $COND_LB = "\N{LEFT DOUBLE PARENTHESIS}";
-    $COND_RB = "\N{RIGHT DOUBLE PARENTHESIS}";
-    $COND_MULT = "\N{MULTIPLICATION SIGN}";
-    $LQ = "«";
-    $RQ = "»";
-  } else {
-    $COND_LB = "(";
-    $COND_RB = ")";
-    $COND_MULT = "x";
-    $LQ = "<<";
-    $RQ = ">>";
-  }
 
   if ($debug) {
     our $_dbmaxlen = INT_MAX;
@@ -1971,7 +1981,8 @@ sub _Interpolate {
   &_SaveAndResetPunct;
 
   my $debug = $self->Debug;
-  my $useqq = $self->Useqq;
+  my $useqq = $self->_get_useqq_set_widechars();
+  #my $useqq = $self->Useqq(); ###TEMP FOR TEST DEBUG
 
   my $q = $useqq ? "" : "q";
   my $funcname = $i_or_d . "vis" .$q;
