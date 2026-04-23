@@ -22,3 +22,6 @@ https://fast2-matrix.cpantesters.org/?dist=Data-Dumper-Interp
 
 http://matrix.cpantesters.org/?dist=Data-Dumper-Interp
 
+# To over-ride the default next version number:
+V=A.B.C dzil release # or build
+
