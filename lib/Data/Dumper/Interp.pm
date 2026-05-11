@@ -2324,6 +2324,7 @@ sub DB_Vis_Eval($$) {
 
   if ($errmsg) {
     $errmsg = Data::Dumper::Interp::_chop_ateval($errmsg);
+    $errmsg =~ s/Global symbol "([^"]*)" requires explicit package name.*/$1 does not exist (or has been optimized out)/;
     Carp::carp("${label_for_errmsg} interpolation error: $errmsg\n");
     @result = ( (defined($result[0]) ? $result[0] : "")."<invalid/error>"
                 , "" # second item in case this ends up in %{ ... }
