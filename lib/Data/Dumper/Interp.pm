@@ -1554,7 +1554,7 @@ sub _postprocess_DD_result {
       $showspaces        = 1,next if /space/;
       $underscores      = 1,next if /under/;
       $_ = "qq={}" if $_ eq "qq"; # deprecated
-      if (/^qq=(.)(.)$/) { # deprecated
+      if (/^qq=(.)(.)$/) {
         $q_pfx = "qq"; $q_lq = $1; $q_rq = $2;
         next
       }
@@ -1974,7 +1974,7 @@ sub _postprocess_DD_result {
 
 sub _Interpolate {
   my ($self, $input, $i_or_d) = @_;
-  _croak_or_confess $i_or_d."vis('$input') called in void context.\nDid you forget to 'say ...'?"
+  _croak_or_confess $i_or_d."vis called in void context.\nDid you forget to 'say ...'?"
     unless defined wantarray;
 
   return "<undef arg>" if ! defined $input;
@@ -2258,7 +2258,7 @@ sub DB_Vis_Interpolate {
 sub DB_Vis_Eval($$) {
   my ($label_for_errmsg, $evalarg) = @_;
   Carp::confess("Data::Dumper::Interp bug:empty evalarg") if $evalarg eq "";
-  # Inspired perl5db.pl but at this point has been rewritten
+  # Originally inspired by perl5db.pl but at this point has been rewritten
 
   # Find the closest non-DB caller.  The eval will be done in that package.
   #
@@ -2335,7 +2335,7 @@ sub DB_Vis_Eval($$) {
 }# DB_Vis_Eval
 
 1;
- __END__
+__END__
 
 =pod
 
@@ -2370,8 +2370,7 @@ Data::Dumper::Interp - interpolate Data::Dumper output into strings for human co
     #   and @ARGV=("-i","/file/path")
 
   # Functions to format one thing
-  say vis $href;     # {abc => [1,2,3,4,5], def => undef}
-  say vis \@ARGV;    # ["-i", "/file/path"]  # any scalar
+  say vis $href;     # {abc => [1,2,3,4,5], def => undef}  #any scalar
   say avis @ARGV;    # ("-i", "/file/path")
   say hvis %hash;    # (abc => [1,2,3,4,5], def => undef)
 
@@ -2379,9 +2378,9 @@ Data::Dumper::Interp - interpolate Data::Dumper output into strings for human co
   say visr $href;     # HASH<457:1c9>{abc => [1,2,3,4,5], ...}
 
   # Just abbreviate a referent address or arbitrary number
-  say addrvis refaddr($href);  # 457:1c9
-  say addrvis $href;           # HASH<457:1c9>
   say addrvis $obj;            # Foo::Bar<984:ef8>
+  say addrvis $href;           # HASH<457:1c9>
+  say addrvis refaddr($href);  # 457:1c9
 
   # Stringify objects
   { use bigint;
@@ -2392,12 +2391,9 @@ Data::Dumper::Interp - interpolate Data::Dumper output into strings for human co
     # But if you do want to see object internals...
     #
     say visnew->viso($struct);
-      # --> {debt => bless({...lots of stuff...},'Math::BigInt')}
-
-    # These all do the same thing
+     OR
     say visnew->Objects(0)->vis($struct);
-    { local $Data::Dumper::Interp::Objects=0; say vis $struct; }
-    say viso $struct;   # 'viso' is not exported by default
+      # --> {debt => bless({...lots of stuff...},'Math::BigInt')}
   }
 
   # Wide characters are readable
@@ -2409,9 +2405,6 @@ Data::Dumper::Interp - interpolate Data::Dumper output into strings for human co
   #-------- OO API --------
 
   say visnew->MaxStringwidth(50)->Maxdepth($levels)->vis($datum);
-
-  say Data::Dumper::Interp->new()
-            ->MaxStringwidth(50)->Maxdepth($levels)->vis($datum);
 
   #-------- RefArgFormatter for Carp --------
 
@@ -2480,7 +2473,7 @@ Expressions are evaluated in the caller's context using Perl's debugger
 hooks, and may refer to almost any lexical or global visible at
 the point of call (see "LIMITATIONS").
 
-IMPORTANT: The argument must be single-quoted to prevent Perl
+IMPORTANT: The argument string must be single-quoted to prevent Perl
 from interpolating it beforehand.
 
 =head2 dvis I<'string to be interpolated'>
@@ -2512,7 +2505,7 @@ show strings in single-quoted form (implied by the 'B<q>' suffix).
 There are no fixed function names; you can use any modifier
 characters in any order, prefixed or suffixed to the primary name
 with optional '_' separators.
-The function will be I<generated> when it is imported* or called as a method.
+The function will be I<generated> when it is imported or called as a method.
 
 The available modifier characters are:
 
@@ -2623,9 +2616,7 @@ call them as methods and import only the C<visnew> function:
 (C<visnew> creates a new object.  Non-existent methods are auto-generated
 via the AUTOLOAD mechanism).
 
-* Only stub declarations with prototypes are generated
-when functions are imported; bodies are auto-generated when first called.
-Use the C<:debug> import tag to see details.
+Use the C<:debug> import tag to see function/method generation.
 
 =head1 Showing Abbreviated Addresses
 
@@ -2751,8 +2742,6 @@ B<overloads =E<gt> "ignore"> : Overloaded operators are not evaluated at all;
 the original object's abbreviated refaddr is shown
 (if you want to see object internals, disable I<Objects> entirely.)
 
-Deprecated: B<show_classname =E<gt> False> : Please use S<< B<overloads =E<gt> "transparent"> instead. >>
-
 =back
 
 The I<objects> value indicates whether and for which classes special
@@ -2828,14 +2817,6 @@ Show numbers with '_' seprating groups of 3 digits.
 
 Use the given symbols instead of double quotes.  The symbols may
 contain multiple characters. Escape , or : with backslash(E<92>).
-
-=item "qq=XY"
-
-(Deprecated) Equivalent to "style=qqX,Y"
-
-=item "qq"
-
-(Deprecated) Equivalent to "style=qq{,}"
 
 =back
 
@@ -2968,7 +2949,7 @@ When the address of a shared variable is shown
 (e.d. when the B<Refaddr> option is enabled or if calling B<addrvis()>),
 the variable's I<globally unique ID> shown instead of the C<refaddr>.
 
-(The C<refaddr> of a shared variable is misleading it refers
+(The C<refaddr> of a shared variable is misleading; it refers
 to a thread-local intermediary and may be different in
 each thread even though the same shared object is being referenced).
 
@@ -3027,7 +3008,6 @@ and '␤' may be shown for newline (and similarly for other ASCII controls).
 
 =item *
 
-Unless B<Deparse> is enabled,
 CODE refs show the name of the referenced sub using L<Sub::Identify>
 instead of C<sub{ "DUMMY" }>.  If the sub is anonymous, the file:lineno
 where it was defined is shown.
