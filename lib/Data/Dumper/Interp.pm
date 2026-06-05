@@ -160,9 +160,9 @@ sub _dbvisnew($) {
               #->Useperl(1)
 }
 sub _dbvis(_) {chomp(my $s=_dbvisnew(shift)->Useqq(1)->Dump); $s }
+sub _dbvis1(_){chomp(my $s=_dbvisnew(shift)->Useqq(1)->Maxdepth(1)->Dump); $s }
+sub _dbvis2(_){chomp(my $s=_dbvisnew(shift)->Useqq(1)->Maxdepth(2)->Dump); $s }
 sub _dbvisq(_){chomp(my $s=_dbvisnew(shift)->Useqq(0)->Dump); $s }
-sub _dbvis1(_){chomp(my $s=_dbvisnew(shift)->Maxdepth(1)->Useqq(1)->Dump); $s }
-sub _dbvis2(_){chomp(my $s=_dbvisnew(shift)->Maxdepth(3)->Useqq(1)->Dump); $s }
 sub _dbavis(@){ "(" . join(", ", map{_dbvis} @_) . ")" }
 sub _dbavis2(@){ "(" . join(", ", map{_dbvis2} @_) . ")" }
 sub _dbrvis(_) { (ref($_[0]) ? addrvis(refaddr $_[0]) : "")._dbvis($_[0])  }
@@ -288,6 +288,7 @@ has Foldwidth      => (is=>'rw', default => sub{
                        });
 has Foldwidth1     => (is=>'rw', default => sub{ $Foldwidth1            });
 has _Listform      => (is=>'rw');
+has _VisitState    => (is=>'rw', default => sub{ {my_visit_depth => 0} });
 
 sub _SetDefaults {
     my $self = shift;
@@ -645,6 +646,7 @@ sub visnew()  { __PACKAGE__->new() }  # shorthand
 # The optional options are for use when currying, e.g.
 #   $Carp::RefArgFormatter = sub($) { Data::Dumper::Interp::CarpArgFormatter($_[0], Maxdepth=9, ...) }
 sub RefArgFormatter {
+  local $Carp::RefArgFormatter = undef;  # prevent recursion
   my ($item, %opts) = @_;
   $opts{Maxdepth} //= 3;
   $opts{MaxStringwidth} //= 1000;
@@ -726,12 +728,9 @@ use constant {
 };
 
 #---------------------------------------------------------------------------
-my  $my_maxdepth;
-our $my_visit_depth = 0;
 
-my ($maxstringwidth, $truncsuffix, $trunctailwidth, $objects,
-    $opt_refaddr, $listform, $debug);
-my ($sortkeys, $ovopt);
+# We may be called recursively via $Carp::RefArgFormatter !
+# So can't use globals which might change.
 
 sub _Do {
   oops unless @_ == 1;
@@ -740,14 +739,16 @@ sub _Do {
   local $_;
   &_SaveAndResetPunct;
 
-  ($maxstringwidth, $truncsuffix, $trunctailwidth, $objects, $opt_refaddr, $listform, $debug)
+  local $Carp::RefArgFormatter = undef;  # prevent recursion
+
+  my ($maxstringwidth, $truncsuffix, $trunctailwidth, $objects, $opt_refaddr, $listform, $debug)
     = @$self{qw/MaxStringwidth Truncsuffix Trunctailwidth Objects Refaddr _Listform Debug/};
-  $sortkeys = $self->Sortkeys;
+  my $sortkeys = $self->Sortkeys;
 
   $maxstringwidth = 0 if ($maxstringwidth //= 0) >= INT_MAX;
   $truncsuffix //= "...";
   $trunctailwidth = min($trunctailwidth//0, $maxstringwidth);
-  $ovopt = "tagged";
+  my $ovopt = "tagged";
   if (ref($objects) eq "HASH") {
     foreach my $key (keys %$objects) {
       if ($key eq 'show_classname') { # DEPRECATED
@@ -780,13 +781,23 @@ sub _Do {
     if ! defined wantarray;
 
   # Allow one extra level if we wrapped the user's args in __getself_[ah]
-  $my_maxdepth = $self->Maxdepth || INT_MAX;
+  my $my_maxdepth = $self->Maxdepth || INT_MAX;
   ++$my_maxdepth if $listform && $my_maxdepth < INT_MAX;
 
-  oops unless $my_visit_depth == 0;
+  @{ $self->{_VisitState} }{ qw/maxstringwidth truncsuffix trunctailwidth
+       objects opt_refaddr listform debug ovopt my_maxdepth my_visit_depth
+       in_overload_replacement/ }
+    =
+  ($maxstringwidth, $truncsuffix, $trunctailwidth, $objects, $opt_refaddr, $listform, $debug, $ovopt, $my_maxdepth, 0, 0);
+
   my $modified = $self->visit($original); # see Data::Visitor
 
-  btw "## DD input : ",_dbvis($modified) if $debug;
+  ($maxstringwidth, $truncsuffix, $trunctailwidth, $objects, $opt_refaddr, $listform, $debug, $ovopt, $my_maxdepth)
+  =
+  @{ $self->{_VisitState} }{ qw/maxstringwidth truncsuffix trunctailwidth
+       objects opt_refaddr listform debug ovopt my_maxdepth/ };
+
+  btw "## DD input : ",_dbvis($modified)," my_maxdepth=$my_maxdepth" if $debug;
   $self->dd->Values([$modified]);
 
   # Always call Data::Dumper with Indent(0) and Pad("") to get a single
@@ -829,15 +840,17 @@ sub _Do {
 #----------------------------------------------------------------------------
 # methods called from Data::Visitor (and helpers) when transforming the input
 
-our $in_overload_replacement = 0;
-
-sub _prefix_refaddr($;$) {
-  my ($item, $original) = @_;
+sub _prefix_refaddr {
+  my ($self, $item, $original) = @_;
   # If enabled by Refaddr(true):
   #
   # Prefix (the formatted representation of) a ref with it's abbreviated
   # address.  This is done by wrapping the ref in a temporary [array] with the
   # prefix, and unwrapping the Data::Dumper result in _postprocess_DD_result().
+  my ($my_visit_depth, $opt_refaddr, $listform, $in_overload_replacement,
+      $debug) = @{ $self->{_VisitState} }
+  { qw/my_visit_depth   opt_refaddr   listform   in_overload_replacement
+       debug/ };
   return $item
     unless $opt_refaddr
            && ! $in_overload_replacement
@@ -855,8 +868,10 @@ say "_prefix_refaddr: ior=$in_overload_replacement pfx=$pfx ix=$ix original=",_d
   $item
 }#_prefix_refaddr
 
-sub _object_subst($) {
-  my $item = shift;
+sub _object_subst {
+  my ($self, $item) = @_;
+  my ($ovopt, $debug, $objects) = @{ $self->{_VisitState} }
+  { qw/ovopt   debug   objects/ };
   my $overload_depth;
   CHECKObject: {
     if (my $class = blessed($item)) {
@@ -948,15 +963,24 @@ btw '@@@repl (no overload repl, not Regexp)' if $debug;
 }#_object_subst
 
 sub visit_value {
-  my $self = shift;
-  say "!V value ",_dbravis2(@_)," depth:$my_visit_depth" if $debug;
-  my $item = shift;
+  my ($self, $item) = @_;
   # N.B. Not called for hash keys (short-circuited in visit_hash_key)
+
+  my ($my_visit_depth, $my_maxdepth, $opt_refaddr, $listform,
+      $in_overload_replacement, $maxstringwidth, $truncsuffix,
+      $trunctailwidth, $debug) = @{ $self->{_VisitState} }
+  { qw/my_visit_depth   my_maxdepth   opt_refaddr   listform
+       in_overload_replacement   maxstringwidth   truncsuffix
+       trunctailwidth   debug/ };
+
+  say "!V value ",_dbravis2(@_)," depth:$my_visit_depth" if $debug;
+  btw "!         vd=$my_visit_depth my_maxdepth=$my_maxdepth" if $debug;
+
 
   return $item
     if !defined($item);
 
-  return _object_subst($item)
+  return $self->_object_subst($item)
     if defined(blessed $item);
 
   return $item
@@ -997,17 +1021,23 @@ btw '@@@repl truncating ',substr($item,0,10),"...","[ msw=$maxstringwidth l=",le
 
 sub visit_hash_key {
   my ($self, $item) = @_;
-  say "!V visit_hash_key ",_dbravis2($item)," depth:$my_visit_depth" if $debug;
+  my ($debug) = @{ $self->{_VisitState} } { qw/debug/ };
+
+  say "!V visit_hash_key ",_dbvis($item) if $debug;
   return $item; # don't truncate or otherwise munge
 }
 
 sub visit_object {
-  my $self = shift;
-  my $item = shift;
+  my ($self, $item) = @_;
+  my ($my_visit_depth, $debug) = @{ $self->{_VisitState} }
+  { qw/my_visit_depth   debug/ };
+
   say "!V object a=",_refaddrdechex($item)," depth:$my_visit_depth"," item=",_dbvis1($item) if $debug;
   my $original = $item;
 
-  local $my_visit_depth = $my_visit_depth + 1;
+  local $self->{_VisitState}->{my_visit_depth}
+      = $self->{_VisitState}->{my_visit_depth} + 1;
+
   # FIXME: with Objects(0) we should visit object internals so $my_maxdepth
   #  can be applied correctly.  Currently we just leave object refs as-is
   #  for D::D to expand, and Maxdepth will be handled incorrectly if this
@@ -1016,12 +1046,14 @@ sub visit_object {
   # First register the ref (to detect duplicates); this calls visit_seen()
   # which usually substitutes something.
   { # Suppress Refaddr treatment of the results of any overloads
-    local $in_overload_replacement = $in_overload_replacement + 1;
+    local $self->{_VisitState}->{in_overload_replacement}
+      = $self->{_VisitState}->{in_overload_replacement} + 1;
+
     my $nitem = $self->SUPER::visit_object($item);
     # Can not compare object refs with != in case that op is not defined!
     # (and refaddr() returns undef if $nitem is e.g. a "magic string")
     if (u(refaddr($nitem)) ne u(refaddr($item))) {
-      say "!     (obj) new: $item --> ",_dbvis2($nitem) if $debug;
+      say "!     (obj) new: $item --> ",_dbrvis2($nitem) if $debug;
       $item = $nitem;
       # Re-visit the replacement item, which might contain inner structure.
       $nitem = $self->SUPER::visit($item);
@@ -1029,16 +1061,20 @@ sub visit_object {
       $item = $nitem;
     }
   }
-  $item = _prefix_refaddr($item, $original);
+  $item = $self->_prefix_refaddr($item, $original);
   $item
 }#visit_object
 
 sub visit_ref {
   my ($self, $item) = @_;
+
+  my ($my_visit_depth, $my_maxdepth, $debug) = @{ $self->{_VisitState} }
+  { qw/my_visit_depth   my_maxdepth   debug/ };
+
   if (ref($item) eq 'ARRAY') {
-    say "!V ref  A=",_refaddrdechex($item)," depth:$my_visit_depth max:$my_maxdepth item=",_dbavis2(@$item) if $debug;
+    say "!V ref  ",addrvis($item)," depth:$my_visit_depth max:$my_maxdepth item=",_dbavis2(@$item) if $debug;
   } else {
-    say "!V ref  a=",_refaddrdechex($item)," depth:$my_visit_depth max:$my_maxdepth item=",_dbvis1($item) if $debug;
+    say "!V ref  ",addrvis($item)," depth:$my_visit_depth max:$my_maxdepth item=",_dbvis1($item) if $debug;
   }
   my $original = $item;
 
@@ -1046,7 +1082,7 @@ sub visit_ref {
   # Data::Dumper's Maxdepth() option will not work as we intend.
   # Therefore we implement Maxdepth ourself
   if ($my_visit_depth >= $my_maxdepth) {
-    oops "vd=$my_visit_depth maxd=$my_maxdepth debug=",_dbvis($debug)," item=",_dbshow($item),"\n   self=",_dbvis($self)
+    oops "[vd=$my_visit_depth maxd=$my_maxdepth debug=",_dbvis($debug),"]\n\n   item=",_dbshow($item),"\n\n   self=",_dbvis($self), "\n\n"
       unless $my_visit_depth == $my_maxdepth;
     $item = _MAGIC_NOQUOTES_PFX.addrvis($item);
     say "!       maxdepth reached, returning ",_dbvis2($item) if $debug;
@@ -1062,26 +1098,36 @@ sub visit_ref {
       $subname .= "\@".basename($file).":$line";
     }
     $item = _MAGIC_NOQUOTES_PFX.'\&'.$subname;
-    say "!       CODEref without DEPARSE, returning ",_dbvis2($item) if $debug;
+    say "!       CODEref without Deparse, returning ",_dbvis2($item) if $debug;
     #return $item;
   }
 
   # First descend into the structure, probably returning a clone
-  local $my_visit_depth = $my_visit_depth + 1;
+  local $self->{_VisitState}->{my_visit_depth}
+      = $self->{_VisitState}->{my_visit_depth} + 1;
+
   if (ref($item)) { # not replaced above...
     #my $nitem = $self->SUPER::visit_ref($item);
+btw "# descending... vd=$my_visit_depth my_maxdepth=$my_maxdepth" if $debug;
     my $nitem = $self->SUPER::visit_ref($item);
-    say "!       (ref) new: ",_dbvis2($item), " --> ",_dbvis2($nitem) if $debug;
+btw "# ...back up... vd=$my_visit_depth my_maxdepth=$my_maxdepth" if $debug;
+    say "!       (ref) new: ",_dbrvis2($item),
+      "\n               --> ",_dbrvis2($nitem) if $debug;
     $item = $nitem;
   }
 
   # Prepend the original address to whatever the representation is now
-  $item = _prefix_refaddr($item, $original);
+  $item = $self->_prefix_refaddr($item, $original);
 
   $item
-}
+}#visit_ref
 sub visit_hash_entries {
   my ($self, $hash) = @_;
+  my ($my_visit_depth, $my_maxdepth, $sortkeys, $debug) = @{ $self->{_VisitState} }
+  { qw/my_visit_depth   my_maxdepth   sortkeys   debug/ };
+
+  say "!V hash_entries ",addrvis($hash) if $debug;
+  btw "!                vd=$my_visit_depth my_maxdepth=$my_maxdepth" if $debug;
   # Visit in sorted order
   return map { $self->visit_hash_entry( $_, $hash->{$_}, $hash ) }
              (ref($sortkeys) ? @{ $sortkeys->($hash) } : (sort keys %$hash));
@@ -1089,6 +1135,9 @@ sub visit_hash_entries {
 
 sub visit_glob {
   my ($self, $item) = @_;
+  my ($my_visit_depth, $debug) = @{ $self->{_VisitState} }
+  { qw/my_visit_depth   debug/ };
+
   say "!V glob ref()=",ref($item)," depth:$my_visit_depth"," item=",_dbravis2($item) if $debug;
   # By default Data::Visitor will create a new anon glob in the output tree.
   # Instead, put the original into the output so the user can recognize
@@ -1098,6 +1147,9 @@ sub visit_glob {
 
 sub visit_seen {
   my ($self, $data, $first_result) = @_;
+  my ($my_visit_depth, $opt_refaddr, $debug) = @{ $self->{_VisitState} }
+  { qw/my_visit_depth   opt_refaddr   debug/ };
+
   say "!V seen orig=",_dbrvis2($data)," depth:$my_visit_depth","  1stres=",_dbrvis2($first_result)
     if $debug;
 
@@ -2243,7 +2295,9 @@ sub DB_Vis_Interpolate {
       if ($foldwidth) {
         $self->{Foldwidth1} -= $leftwid if $leftwid < $self->{Foldwidth1}
       }
-      $result .= $self->$methname( DB::DB_Vis_Eval($funcname, $arg) );
+      $result .= $self->$methname(
+                           DB::DB_Vis_Eval($funcname, $arg)
+      );
     }
   }
 
