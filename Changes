@@ -2,6 +2,8 @@
 
 8.001 - [IN PROGESS] Simplify diaagnostic for dvis interpolation error
         Maybe handle recursion from tie handlers.
+        Fix undefined warning if :debug import tag was used.
+        Don't use warnings FATAL => 'all'.
         Localize $Carp::RefArgFormatter to prevent recursion via Carp
 8.000 - Changed the meaning of function-modifier letters 'B' and 'O'.
 7.023 - Revert change to ':all' to no longer set $Carp::RefArgFormatter.

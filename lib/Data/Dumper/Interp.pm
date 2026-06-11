@@ -6,7 +6,8 @@
 ##FIXME: Refaddr(1) has no effect inside Blessed structures
 #
 
-use strict; use warnings FATAL => 'all'; use utf8;
+##use strict; use warnings FATAL => 'all'; use utf8;
+use strict; use warnings; use utf8;
 #use 5.010; # say, state
 #use 5.011; # cpantester gets warning that 5.11 is the minimum acceptable
 #use 5.014; # /r for non-destructive substitution
@@ -88,6 +89,7 @@ our %EXPORT_TAGS = (
 );
 
 sub _generate_sub($;$); # forward
+sub u(_); # forward
 
 our ($COND_LB, $COND_RB, $COND_MULT, $LQ, $RQ);
 
@@ -121,9 +123,9 @@ sub AUTOLOAD {  # invoked on call to undefined *method*
   our $AUTOLOAD;
   _SaveAndResetPunct();
   our $Debug;
-  local $Debug = $AUTOLOAD_debug;
-  carp "AUTOLOAD $AUTOLOAD" if $Debug;
-  _generate_sub($AUTOLOAD);
+  { local $Debug = $AUTOLOAD_debug;
+    _generate_sub($AUTOLOAD);
+  }
   _RestorePunct();
   no strict 'refs';
   goto &$AUTOLOAD;
@@ -133,7 +135,6 @@ sub AUTOLOAD {  # invoked on call to undefined *method*
 ############################################################################
 # Internal debug-message utilities
 
-sub u(_); # forward
 sub oops(@) { @_=("\n".(caller)." oops:\n",@_,"\n"); goto &Carp::confess }
 sub btwN($@) { my $N=shift; local $_=join("",map{u} @_); s/\n\z//s; printf "%4d: %s\n",(caller($N))[2],$_; }
 sub btw(@) { unshift @_,0; goto &btwN }
@@ -174,7 +175,7 @@ sub _dbshow(_) {
               : _dbvis($v)               # something else
 }
 our $_dbmaxlen = 300;
-sub _dbrawstr(_) { "${LQ}".(length($_[0])>$_dbmaxlen ? substr($_[0],0,$_dbmaxlen-3)."..." : $_[0])."${RQ}" }
+sub _dbrawstr(_) { ($LQ//"<<").(length($_[0])>$_dbmaxlen ? substr($_[0],0,$_dbmaxlen-3)."..." : $_[0]).(${RQ}//">>") }
 sub _dbstr($) {
   local $_ = shift;
   return "undef" if !defined;
@@ -1562,6 +1563,7 @@ use constant _WRAP_STYLE => (_WRAP_ALLHASH);
 sub _get_useqq_set_widechars {
   my ($self) = @_;
   my $useqq = $self->Useqq();
+  my $unesc_unicode;
   if ($useqq) {
 
     carp "WARNING: The Useqq specification string ",_dbvis($useqq)," contains a non-ASCII character but 'use utf8;' was not in effect when the literal was compiled; the intended chracter was probably not used.\n"
@@ -2206,7 +2208,7 @@ sub import {
     if (/^:debug(.*)/) {
       my $rhs = $1;
       my $level = $rhs eq "" ? 1 : $rhs =~ /^=(\d+)$/ ? $1 : croak "INVALID import $_";
-      $import_debug = $AUTOLOAD_debug = $Debug = $level; # show generated code
+      $import_debug = $AUTOLOAD_debug = $level; # show generated code
     }
     elsif (/^:DEFAULT/) {
       push @args, @EXPORT;
