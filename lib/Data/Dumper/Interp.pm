@@ -501,7 +501,7 @@ sub __getself { # Return $self if passed or else create a new object
   local $@;
   my $blessed = eval{ blessed($_[0]) }; # In case a tie handler throws
   croak _chop_ateval($@) if $@;
-  $blessed && $_[0]->isa(__PACKAGE__) ? shift : __PACKAGE__->new()
+  ($blessed && $_[0]->isa(__PACKAGE__)) ? shift(@_) : __PACKAGE__->new()
 }
 sub __getself_s { &__getself->Values([$_[0]]) }
 sub __getself_a { &__getself->Values([[@_]])   }
@@ -773,7 +773,8 @@ sub _Do {
   }
   $objects = [ $objects ] unless ref($objects //= []) eq 'ARRAY';
 
-  my @orig_values = $self->dd->Values;
+  my $dd = $self->dd || oops vis($self->dd);
+  my @orig_values = $dd->Values;
   croak "Exactly one item may be in Values" if @orig_values != 1;
   my $original = $orig_values[0];
   btw "##ORIGINAL=",u($original),"=",_dbvis($original) if $debug;
@@ -799,7 +800,7 @@ sub _Do {
        objects opt_refaddr listform debug ovopt my_maxdepth/ };
 
   btw "## DD input : ",_dbvis($modified)," my_maxdepth=$my_maxdepth" if $debug;
-  $self->dd->Values([$modified]);
+  $dd->Values([$modified]);
 
   # Always call Data::Dumper with Indent(0) and Pad("") to get a single
   # maximally-compact string, and then manually fold the result to Foldwidth,
@@ -816,7 +817,7 @@ sub _Do {
   { my $dd_warning = "";
 
     { local $SIG{__WARN__} = sub{ $dd_warning .= $_[0] };
-      eval{ $dd_result = $self->dd->Dump };
+      eval{ $dd_result = $dd->Dump };
     }
     if ($dd_warning || $@) {
       warn "Data::Dumper complained:\n$dd_warning\n$@" if $debug;
@@ -832,7 +833,7 @@ sub _Do {
 
   # Allow deletion of the possibly-recursive clone
   circular_off($modified);
-  $self->dd->Values([]);
+  $dd->Values([]);
 
   &_RestorePunct;
   $our_result;
