@@ -32,7 +32,7 @@ package Data::Dumper::Interp;
 
 # Arrgh!  Moose forcibly enables experimental feature warnings!
 # So import Moose first and then adjust warnings...
-use Moose;
+use Moose 2.4000;
 
 extends 'Data::Visitor' => { -version => 0.32 },
         'Exporter'      => { -version => 5.57 },
@@ -1347,13 +1347,10 @@ sub _show_as_number(_) {
   # Sigh.  With Perl 5.32 (at least) $value & "..." stringifies $value
   # or so it seems.
   if (blessed($value)) {
-    # BUG HERE - warnings "bareword operator..." if $value is not number-like
-    #   not be caught by eval.
-    #   override SIG{__WARN__} ??? or
-    #   Pre-check with looks_like_number or regex??
-    #
-    # +42 might throw if object is not numberish e.g. a DateTime
-    if (blessed(eval "$value+42")) {
+    # If $value is garbage perl will print compile-error warnings
+    # but not die, so eval won't swallow them
+    local $SIG{__WARN__} = sub {die @_};
+    if (blessed( eval{ $value+42 } )) {
       warn "    Object and value+42 is still an object, so probably numberish\n"
         if $Debug;
       return 1
