@@ -1347,8 +1347,13 @@ sub _show_as_number(_) {
   # Sigh.  With Perl 5.32 (at least) $value & "..." stringifies $value
   # or so it seems.
   if (blessed($value)) {
+    # BUG HERE - warnings "bareword operator..." if $value is not number-like
+    #   not be caught by eval.
+    #   override SIG{__WARN__} ??? or
+    #   Pre-check with looks_like_number or regex??
+    #
     # +42 might throw if object is not numberish e.g. a DateTime
-    if (blessed(eval{ $value + 42 })) {
+    if (blessed(eval "$value+42")) {
       warn "    Object and value+42 is still an object, so probably numberish\n"
         if $Debug;
       return 1
@@ -2562,7 +2567,7 @@ show strings in single-quoted form (implied by the 'B<q>' suffix).
 There are no fixed function names; you can use any modifier
 characters in any order, prefixed or suffixed to the primary name
 with optional '_' separators.
-The function will be I<generated> when it is imported or called as a method.
+The function will be I<generated> when it is imported or first called as a method.
 
 The available modifier characters are:
 
@@ -2592,14 +2597,6 @@ B<B> - Optimize for strings containing binary octets.
 
 B<q> - show strings 'single quoted' if possible
 
-=over
-
-With B<q> Data::Dumper is called with C<Useqq(0)>, but depending
-on the version of Data::Dumper the result may be "double quoted"
-anyway if wide characters are present.
-
-=back
-
 B<u> - show numbers with underscores between groups of three digits
 
 =back
@@ -2622,13 +2619,15 @@ By default the following are guaranteed to be imported:
 
 The following special import tags are available:
 
-  :all - Imports all function variations, spelled with modifier
-         letters appended to the basic name in alphabetical order.
+  :DEFAULT - imports the functions listed above (useful with other :tags)
 
-  :carp - Format ref args in Carp tracebacks with C<vis>
-          (installs $Carp::RefArgFormatter)
+  :all     - Imports all function variations, spelled with modifier
+             letters appended to the basic name in alphabetical order.
 
-  :debug - Show functions/methods as they are generated
+  :carp    - Format ref args in Carp tracebacks with C<vis>
+             (installs $Carp::RefArgFormatter)
+
+  :debug   - Show functions/methods as they are generated
 
   :Optionname=VALUE - Set global variable '$Optionname' to eval(VALUE).
 
@@ -2817,8 +2816,15 @@ value, e.g. "A.20" sorts before "A.100".  See C<Data::Dumper> documentation.
 
 0 means generate 'single quoted' strings when possible.
 
+=over
+
+(The result may be "double quoted" anyway if wide characters are present,
+depending on the version of Data::Dumper.)
+
+=back
+
 1 means generate "double quoted" strings as-is from Data::Dumper.
-Non-ASCII charcters will likely appeqar as hex or octal escapes.
+Non-ASCII charcters may appear as hex or octal escapes.
 
 Otherwise generate "double quoted" strings enhanced according to option
 keywords given as a :-separated list, e.g. Useqq("unicode:controlpics").
@@ -2893,7 +2899,7 @@ Functions/methods with 'q' in their name force C<Useqq(0)>;
 
 See C<Data::Dumper> documentation.
 
-=head1 B<set_defaults> Method
+=head2 B<set_defaults> Method
 
 As an alternative to directly setting the global variables listed above,
 the corresponding I<methods> can be called on an object
@@ -2953,7 +2959,7 @@ unquoted.  Useful with bash or csh.
 
 Format e.g. a shell command and arguments, quoting when necessary.
 
-Returns a single string with items separated by spaces.
+Returns a single string with possibly-quoted items separated by spaces.
 
 =head1 LIMITATIONS
 
